@@ -9,9 +9,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from orderguard.api.schemas import (
+    CustomerOut,
+    DriverOut,
     ExperimentRequest,
     ExperimentResponseOut,
     HighRiskOrderOut,
+    MapEntitiesOut,
+    MerchantOut,
     OrderSummaryOut,
     RiskAssessmentOut,
     SimulationMetricsOut,
@@ -95,6 +99,24 @@ def list_simulation_orders(
         session, run_id, status=status, limit=limit, offset=offset
     )
     return [OrderSummaryOut.model_validate(o) for o in orders]
+
+
+@router.get("/{run_id}/map", response_model=MapEntitiesOut)
+def get_map_entities(run_id: str, session: Session = Depends(get_session)) -> MapEntitiesOut:
+    if repository.get_simulation_run(session, run_id) is None:
+        raise HTTPException(status_code=404, detail="Simulation run not found")
+    return MapEntitiesOut(
+        merchants=[
+            MerchantOut.model_validate(m) for m in repository.get_merchants_for_run(session, run_id)
+        ],
+        drivers=[
+            DriverOut.model_validate(d) for d in repository.get_drivers_for_run(session, run_id)
+        ],
+        customers=[
+            CustomerOut.model_validate(c)
+            for c in repository.get_customers_for_run(session, run_id)
+        ],
+    )
 
 
 @router.get("/{run_id}/high-risk", response_model=list[HighRiskOrderOut])

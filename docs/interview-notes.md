@@ -27,6 +27,29 @@ engine owns; nothing touches the global `random` module. Verified by test
 (`test_run_is_deterministic`) and manually (two full runs, identical seed,
 byte-identical order statuses and event counts).
 
+**A real bug this surfaced**: the engine tracks in-flight orders in a few
+`set[str]` fields (`_en_route_to_merchant`, `_at_merchant_waiting`,
+`_en_route_to_customer`) and iterated them directly in the per-tick hazard
+and travel loops. CPython's `set` iteration order depends on each string's
+hash, and string hashing is randomized *per process* (`PYTHONHASHSEED`)
+unless pinned — so two separate `python` invocations with the *identical*
+config and seed could still process orders in a different order within a
+tick, meaning two orders sharing the one seeded RNG stream would draw
+different random numbers depending on which process happened to hash
+`"order-000042"` first. Within a single process (e.g. two calls in the same
+pytest run) this stayed invisible — same hash seed, same order, looked
+perfectly reproducible — which is exactly why it slipped through initially
+and only showed up as an intermittent failure when the full suite ran in a
+fresh process. Fixed by iterating `sorted(...)` over these sets instead of
+`list(...)`, which also happens to sort orders by creation order (IDs are
+zero-padded and sequential). Confirmed fixed by running the same
+config/seed under three different `PYTHONHASHSEED` values and diffing
+outcomes.
+
+This is a good illustration of why "looks deterministic when I ran it
+twice" isn't sufficient evidence — the bug required varying something
+(process/hash seed) that a single dev session wouldn't naturally vary.
+
 **Ground truth vs. prediction**: hazards (driver goes offline, customer
 unreachable, spoilage, merchant stockout) are real probabilistic draws
 *scaled by observable entity attributes* (reliability scores, backlog) so

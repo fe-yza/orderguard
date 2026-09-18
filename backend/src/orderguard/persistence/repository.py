@@ -266,6 +266,21 @@ def get_latest_risk_assessments_for_run(
     return results
 
 
+def get_merchants_for_run(session: Session, run_id: str) -> list[MerchantRecord]:
+    stmt = select(MerchantRecord).where(MerchantRecord.simulation_run_id == run_id)
+    return list(session.execute(stmt).scalars())
+
+
+def get_drivers_for_run(session: Session, run_id: str) -> list[DriverRecord]:
+    stmt = select(DriverRecord).where(DriverRecord.simulation_run_id == run_id)
+    return list(session.execute(stmt).scalars())
+
+
+def get_customers_for_run(session: Session, run_id: str) -> list[CustomerRecord]:
+    stmt = select(CustomerRecord).where(CustomerRecord.simulation_run_id == run_id)
+    return list(session.execute(stmt).scalars())
+
+
 def get_metrics_for_run(session: Session, run_id: str) -> list[SimulationMetricsRecord]:
     stmt = select(SimulationMetricsRecord).where(
         SimulationMetricsRecord.simulation_run_id == run_id

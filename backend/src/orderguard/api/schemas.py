@@ -136,6 +136,44 @@ class HighRiskOrderOut(BaseModel):
     latest_risk_assessment: RiskAssessmentOut
 
 
+class MerchantOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    location_x_km: float
+    location_y_km: float
+    reliability_score: float
+    final_backlog: int
+
+
+class DriverOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    location_x_km: float
+    location_y_km: float
+    reliability_score: float
+    final_status: str
+
+
+class CustomerOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    location_x_km: float
+    location_y_km: float
+    reachability_score: float
+
+
+class MapEntitiesOut(BaseModel):
+    merchants: list[MerchantOut]
+    drivers: list[DriverOut]
+    customers: list[CustomerOut]
+
+
 class SimulationRunSummaryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

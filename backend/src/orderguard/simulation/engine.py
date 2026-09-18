@@ -300,18 +300,28 @@ class SimulationEngine:
     # -- hazards (offline drivers, spoilage, unreachable customers) --------
 
     def _apply_hazards(self, minute_of_run: int) -> None:
+        # `sorted(...)`, not `list(...)`: these are `set[str]`, whose CPython
+        # iteration order depends on each string's hash — randomized per
+        # process (PYTHONHASHSEED) unless pinned. Iterating a set directly
+        # would make the *order* in which orders compete for the same
+        # shared `self.rng` stream depend on that per-process hash seed,
+        # silently breaking cross-process reproducibility for the exact
+        # same config/seed (each order still gets a hazard roll either way,
+        # but *which* random number it draws would differ run to run).
+        # Sorting by order_id (zero-padded, so this is also creation order)
+        # fixes the processing order deterministically.
         active_before_pickup = self._en_route_to_merchant | self._at_merchant_waiting
-        for order_id in list(active_before_pickup):
+        for order_id in sorted(active_before_pickup):
             self._maybe_driver_goes_offline(order_id, failure_reason=FailureReason.NEVER_PICKED_UP)
 
-        for order_id in list(self._en_route_to_customer):
+        for order_id in sorted(self._en_route_to_customer):
             if order_id not in self.orders:
                 continue
             self._maybe_driver_goes_offline(
                 order_id, failure_reason=FailureReason.DRIVER_NEVER_ARRIVED
             )
 
-        for order_id in list(self._en_route_to_customer):
+        for order_id in sorted(self._en_route_to_customer):
             if order_id not in self.orders:
                 continue
             self._maybe_spoil(order_id)
@@ -383,7 +393,7 @@ class SimulationEngine:
 
     def _advance_travel_to_merchant(self, minute_of_run: int) -> None:
         speed_multiplier = self.config.speed_multiplier_at(minute_of_run)
-        for order_id in list(self._en_route_to_merchant):
+        for order_id in sorted(self._en_route_to_merchant):
             order = self.orders[order_id]
             if order.is_terminal:
                 self._en_route_to_merchant.discard(order_id)
@@ -426,7 +436,7 @@ class SimulationEngine:
 
     def _advance_travel_to_customer(self, minute_of_run: int) -> None:
         speed_multiplier = self.config.speed_multiplier_at(minute_of_run)
-        for order_id in list(self._en_route_to_customer):
+        for order_id in sorted(self._en_route_to_customer):
             order = self.orders[order_id]
             if order.is_terminal:
                 self._en_route_to_customer.discard(order_id)
