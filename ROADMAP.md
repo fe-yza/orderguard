@@ -24,28 +24,39 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done and tested
       `tests/test_domain.py`, `tests/test_simulation.py`)
 
 ## Milestone 2 — Event System
-- [ ] In-process event bus (publish/subscribe), swappable backend interface
-- [ ] Simulation engine emits domain events on every state change
-- [ ] Risk engine (Milestone 3) subscribes/reacts instead of polling
-- [ ] Tests: event ordering, subscriber isolation, no dropped events
+- [x] In-process event bus (publish/subscribe), swappable backend interface
+      (`EventBus` protocol + `InProcessEventBus`)
+- [x] Simulation engine emits domain events on every state change (wired via
+      optional `event_bus` param)
+- [x] Risk engine (Milestone 3) subscribes/reacts instead of polling
+- [x] Tests: subscriber isolation, wildcard + specific-type dispatch, no
+      dropped events (`tests/test_events.py`)
 
 ## Milestone 3 — Rules-Based Risk Engine
-- [ ] Per-delivery: overall risk score (0–100), predicted failure type,
+- [x] Per-delivery: overall risk score (0–100), predicted failure type,
       confidence, predicted delay
-- [ ] Explainable contributing factors with weighted contributions
-- [ ] All inputs derived from observable simulation state — nothing randomly
-      assigned
-- [ ] Thresholds/weights documented and configurable (env/config, not hardcoded)
-- [ ] Tests: known scenarios produce known risk bands
+- [x] Explainable contributing factors with weighted contributions
+      (`RiskFactor` list on every `RiskAssessment`)
+- [x] All inputs derived from observable simulation state — nothing randomly
+      assigned (risk engine never reads the simulation's hidden hazard rolls)
+- [x] Thresholds/weights configurable via `RiskEngine.__init__` kwargs, not
+      hardcoded in rule bodies
+- [x] Tests: known scenarios produce known risk bands + full-run integration
+      against a live simulation (`tests/test_risk.py`)
+- Known limitation (documented, not fixed): purely event-reactive, so risk
+  for an order sitting untouched between two events isn't updated until the
+  next event fires. Acceptable for v1; revisit if the dashboard needs
+  continuous risk decay/growth between events.
 
 ## Milestone 4 — Intervention Engine
-- [ ] Intervention catalog: `DO_NOTHING`, `UPDATE_ETA`, `NOTIFY_CUSTOMER`,
+- [x] Intervention catalog: `DO_NOTHING`, `UPDATE_ETA`, `NOTIFY_CUSTOMER`,
       `NOTIFY_MERCHANT`, `MERCHANT_ESCALATION`, `OFFER_CREDIT`,
       `REASSIGN_DRIVER` — each with cost + applicability conditions
-  Interventions
-- [ ] Expected-value selection model: cost(intervention) vs.
-      P(failure | no intervention) × cost(failure) vs. cost of doing nothing
-- [ ] Tests: selection is deterministic given identical risk state
+- [x] Expected-value selection model: cost(intervention) + residual
+      P(failure) × cost(failure), compared against `DO_NOTHING`'s baseline
+- [x] Tests: selection is deterministic given identical risk state, expected
+      savings vs. `DO_NOTHING` never negative, full-run integration
+      (`tests/test_interventions.py`)
 
 ## Milestone 5 — Experiment Framework
 - [ ] Strategies compared on identical seeded conditions: no intervention,

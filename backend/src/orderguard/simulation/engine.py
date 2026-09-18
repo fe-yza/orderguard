@@ -40,6 +40,7 @@ from orderguard.domain.events import DeliveryEvent
 from orderguard.domain.geo import Point
 from orderguard.domain.merchant import Merchant
 from orderguard.domain.order import Order
+from orderguard.events.bus import EventBus
 from orderguard.simulation.clock import SimClock
 from orderguard.simulation.config import SimulationConfig
 from orderguard.simulation.generators import (
@@ -57,8 +58,9 @@ _PERISHABLE_PROBABILITY = 0.3
 
 
 class SimulationEngine:
-    def __init__(self, config: SimulationConfig) -> None:
+    def __init__(self, config: SimulationConfig, event_bus: EventBus | None = None) -> None:
         self.config = config
+        self.event_bus = event_bus
         self.rng = random.Random(config.seed)
         self.clock = SimClock(start_time=config.start_time)
 
@@ -128,6 +130,8 @@ class SimulationEngine:
         self.events.append(event)
         if order.id in self.deliveries:
             self.deliveries[order.id].record(event)
+        if self.event_bus is not None:
+            self.event_bus.publish(event)
 
     def _release_merchant_capacity(self, order: Order) -> None:
         """Call exactly once per order, when it stops occupying merchant prep
