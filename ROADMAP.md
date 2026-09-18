@@ -59,19 +59,32 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done and tested
       (`tests/test_interventions.py`)
 
 ## Milestone 5 — Experiment Framework
-- [ ] Strategies compared on identical seeded conditions: no intervention,
-      threshold-based, OrderGuard expected-value
-- [ ] Real metrics collected: late rate, cancellation rate, avg delay, P50/P95
+- [x] Strategies compared on identical seeded conditions: no intervention,
+      threshold-based, OrderGuard expected-value (`experiments/runner.py`)
+- [x] Real metrics collected: late rate, cancellation rate, avg delay, P50/P95
       delay, intervention rate, intervention cost, failure/success counts
-- [ ] Results persisted and reproducible — this is the only source of resume
-      numbers
+- [x] Results reproducible given the same config (verified by test); a fresh
+      `SimulationEngine` per strategy re-seeds from `config.seed`, so all
+      three start from identical conditions and diverge only once an
+      intervention actually changes an outcome
+- [x] Intervention effects are now causally wired into the simulation
+      (`SimulationEngine.apply_intervention_effect`) — this is the piece
+      that makes the three strategies actually produce different outcomes,
+      not just different bookkeeping
+- [x] Tests: metrics internally consistent, reproducibility, and a
+      scenario-specific test proving a measurable causal effect
+      (`tests/test_experiments.py`)
 
 ## Milestone 6 — PostgreSQL + FastAPI
-- [ ] Normalized schema + migrations (Alembic)
-- [ ] REST API: orders, drivers, merchants, risk, interventions, simulations,
-      metrics overview
-- [ ] OpenAPI docs via FastAPI
-- [ ] API integration tests
+- [x] Normalized schema + migrations (Alembic; initial migration verified
+      reversible — upgrade → downgrade → upgrade cycle tested)
+- [x] REST API: simulations (create/list/get), per-run orders + high-risk
+      feed + metrics, order detail (timeline/risk/interventions)
+- [x] OpenAPI docs via FastAPI (auto-generated, verified at `/openapi.json`)
+- [x] API integration tests (`tests/test_api.py`, using `TestClient` against
+      a real Postgres test database, not mocks)
+- Dev environment note: this required installing Homebrew, Python 3.12, and
+  PostgreSQL 16 locally (none were present) — see `docs/interview-notes.md`.
 
 ## Milestone 7 — Operations Dashboard
 - [ ] Live stats: active deliveries, high-risk count, failure rate,

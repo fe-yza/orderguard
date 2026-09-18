@@ -86,6 +86,32 @@ class SimulationEngine:
         self._merchant_list = list(self.merchants.values())
         self._customer_list = list(self.customers.values())
 
+        self._risk_multiplier: dict[str, float] = {}
+
+    # -- intervention feedback ---------------------------------------------
+
+    def apply_intervention_effect(self, order_id: str, probability_reduction: float) -> None:
+        """Feed an applied intervention's effect back into the ground-truth
+        hazards for this order — this is what makes the experiment
+        framework's strategies (Milestone 5) actually diverge, rather than
+        computing risk/interventions on the side without them ever changing
+        an outcome. `probability_reduction` (from
+        `interventions/engine.py`'s catalog) scales down every subsequent
+        per-tick hazard roll for this order, and proportionally extends how
+        long it's allowed to wait for a driver before being cancelled. The
+        *strongest* reduction seen for an order wins (min of multipliers),
+        so a later, weaker intervention can't undo an earlier strong one.
+        """
+        if probability_reduction <= 0:
+            return
+        multiplier = 1 - probability_reduction
+        self._risk_multiplier[order_id] = min(
+            self._risk_multiplier.get(order_id, 1.0), multiplier
+        )
+
+    def _hazard_multiplier(self, order_id: str) -> float:
+        return self._risk_multiplier.get(order_id, 1.0)
+
     # -- public API ---------------------------------------------------
 
     def run(self) -> SimulationRun:
@@ -211,7 +237,10 @@ class SimulationEngine:
             waited_minutes = (
                 self.clock.current_time - self._confirmed_at[order_id]
             ).total_seconds() / 60
-            if waited_minutes >= self.config.max_wait_for_driver_minutes:
+            effective_max_wait = (
+                self.config.max_wait_for_driver_minutes / self._hazard_multiplier(order_id)
+            )
+            if waited_minutes >= effective_max_wait:
                 order.transition_to(
                     OrderStatus.CANCELLED,
                     at=self.clock.current_time,
@@ -293,8 +322,10 @@ class SimulationEngine:
             return
         delivery = self.deliveries[order_id]
         driver = self.drivers[delivery.driver_id]
-        probability = self.config.driver_offline_probability_per_tick * (
-            1 - driver.reliability_score
+        probability = (
+            self.config.driver_offline_probability_per_tick
+            * (1 - driver.reliability_score)
+            * self._hazard_multiplier(order_id)
         )
         if self.rng.random() >= probability:
             return
@@ -316,7 +347,11 @@ class SimulationEngine:
             return
         if self.clock.current_time <= order.promised_delivery_time:
             return
-        if self.rng.random() >= self.config.perishable_spoilage_probability_per_tick:
+        probability = (
+            self.config.perishable_spoilage_probability_per_tick
+            * self._hazard_multiplier(order_id)
+        )
+        if self.rng.random() >= probability:
             return
 
         now = self.clock.current_time
@@ -408,8 +443,10 @@ class SimulationEngine:
                 continue
 
             now = self.clock.current_time
-            unreachable_probability = self.config.customer_unreachable_probability * (
-                1 - customer.reachability_score
+            unreachable_probability = (
+                self.config.customer_unreachable_probability
+                * (1 - customer.reachability_score)
+                * self._hazard_multiplier(order_id)
             )
             if self.rng.random() < unreachable_probability:
                 order.transition_to(
