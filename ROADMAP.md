@@ -7,18 +7,21 @@ state of the repo, checked against tests, not intent.
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done and tested
 
 ## Milestone 1 — Repo + Simulation Engine
-- [~] Repo scaffolding, `.gitignore`, roadmap, architecture doc
-- [ ] Domain model: `Merchant`, `Driver`, `Customer`, `Order`, `Delivery`, `DeliveryEvent`
-- [ ] Order lifecycle state machine (created → confirmed → assigned → en route →
+- [x] Repo scaffolding, `.gitignore`, roadmap, architecture doc
+- [x] Domain model: `Merchant`, `Driver`, `Customer`, `Order`, `Delivery`, `DeliveryEvent`
+- [x] Order lifecycle state machine (created → confirmed → assigned → en route →
       arrived → picked up → delivered, + cancel/fail branches)
-- [ ] Driver state machine (available / en route / waiting / delivering / offline)
-- [ ] Environment factors: time of day, demand curve, traffic/congestion
-- [ ] Deterministic seeded randomness (same seed ⇒ same simulation run)
-- [ ] Config-driven marketplace generation (merchant count, driver count, demand
+- [x] Driver state machine (available / en route / waiting / delivering / offline)
+- [x] Environment factors: time of day (rush-hour windows), demand curve, traffic/congestion
+- [x] Deterministic seeded randomness (same seed ⇒ same simulation run — verified
+      by test and by manual two-run comparison)
+- [x] Config-driven marketplace generation (merchant count, driver count, demand
       profile, etc. — no magic numbers baked into code)
-- [ ] Scales from 100 → 100,000 deliveries (measured, not assumed — benchmarked
-      properly in Milestone 7, but sanity-checked here)
-- [ ] Unit tests for domain model + lifecycle transitions
+- [x] Scales from 100 → 100,000 deliveries — sanity-checked manually (~20K orders /
+      147K events in ~9s); full benchmark with baseline/bottleneck analysis is
+      still Milestone 8's job, not done here
+- [x] Unit tests for domain model + lifecycle transitions (59 tests passing:
+      `tests/test_domain.py`, `tests/test_simulation.py`)
 
 ## Milestone 2 — Event System
 - [ ] In-process event bus (publish/subscribe), swappable backend interface

@@ -28,6 +28,7 @@ frontend/.env*.local
 .DS_Store
 .vscode/
 .idea/
+.claude/
 
 # Docker
 *.log
