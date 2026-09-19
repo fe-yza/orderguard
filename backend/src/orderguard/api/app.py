@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from orderguard.api.routers import orders, simulations
+from orderguard.api.routers import simulations
 
 
 def create_app() -> FastAPI:
@@ -24,7 +24,6 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(simulations.router)
-    app.include_router(orders.router)
 
     @app.get("/health", tags=["health"])
     def health() -> dict[str, str]:

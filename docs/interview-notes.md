@@ -236,6 +236,40 @@ both in one flush hit an ordering issue; fixed with an explicit
 trusting automatic dependency sorting across classes with no `relationship()`
 configured between them. Worth digging into further if it recurs elsewhere.
 
+**A third real bug, more serious — found via benchmarking, not inspection**:
+the initial schema used the simulation's own generated IDs
+("merchant-0003", "order-000042", ...) as bare primary keys. Those IDs are
+only unique *within a single run* — every `SimulationEngine` restarts its
+counters from zero (`simulation/generators.py`) — so persisting a *second*
+run ever crashed with `UniqueViolation` on `customers_pkey`. Every test
+passed because each test's `db_session` fixture truncates tables between
+tests, so only one run's rows ever coexisted at a time; the bug only
+surfaced when the API latency benchmark hit `POST /simulations` repeatedly
+against the same, un-truncated database — exactly the kind of thing "run it
+under realistic conditions" catches that unit tests, by construction,
+don't. Fixed by making `merchants`, `drivers`, `customers`, `orders`, and
+`deliveries` use composite primary keys — `(simulation_run_id, id)` — and
+composite foreign keys everywhere they're referenced (`risk_assessments`
+and `intervention_decisions` keep simple UUID keys; those IDs were already
+globally unique). This is a genuinely instructive example of a bug class
+worth naming: **generated IDs that are only unique within a scope will
+eventually collide once more than one instance of that scope exists** — the
+kind of thing that's invisible until you deliberately create two of
+whatever the scope is.
+
+That fix immediately exposed a **fourth bug**, one layer up: `GET
+/orders/{order_id}` had been written as if order IDs were globally unique.
+Once two runs could coexist in the database, the same lookup started
+raising `MultipleResultsFound` instead of quietly returning the wrong run's
+order (arguably worse — a silent wrong answer — but SQLAlchemy's
+`scalar_one_or_none()` correctly refuses to guess). Fixed by moving the
+route to `GET /simulations/{run_id}/orders/{order_id}` — the fix belonged
+in the API contract, not the query — and updating `repository.get_order_
+detail` to require `run_id`, with no unscoped fallback. The frontend's
+order links already had `run_id` in scope wherever they're constructed
+(every order ID reaches the UI from a run-scoped list to begin with), so
+updating the route was mechanical, not a design change.
+
 **Alternatives considered**: SQLite for simplicity. Rejected — the stack
 decision is Postgres from the start (real FK relationships, JSONB, and this
 is meant to demonstrate production-shaped decisions, not the easiest local
@@ -249,9 +283,11 @@ validate input (`api/schemas.py`'s Pydantic models), call into
 the full three-strategy experiment, persists the expected-value run's full
 detail (orders, deliveries, events, risk assessments, intervention
 decisions) plus every strategy's aggregate metrics, and returns the
-comparison. `GET /orders/{id}` is the Order Inspector's data source:
-timeline + risk history + every intervention decision's full cost-comparison
-math.
+comparison. `GET /simulations/{run_id}/orders/{order_id}` is the Order
+Inspector's data source: timeline + risk history + every intervention
+decision's full cost-comparison math — scoped by run, not a flat
+`/orders/{id}`, because order IDs are only unique within a run (see the
+Persistence section's third/fourth bugs above for why that isn't optional).
 
 **Tested against a real database**: `tests/test_api.py` uses FastAPI's
 `TestClient` against a real Postgres test database (`orderguard_test`), not
@@ -311,4 +347,109 @@ comparison grows to need a visual, e.g. a grouped bar chart across many
 experiment runs).
 
 ## Benchmarks
-_Not yet built._
+
+Scripts: `backend/benchmarks/benchmark_simulation.py` (throughput at 1K/10K/
+100K orders, bare engine vs. full risk+intervention stack) and
+`backend/benchmarks/benchmark_api_latency.py` (p50/p95 latency for every
+endpoint against a real running server + real Postgres). Not pytest tests —
+they print measurements, on this dev machine (Apple Silicon, local
+Postgres), not portable performance guarantees. Re-run them yourself before
+citing a number anywhere.
+
+### Simulation throughput: baseline → bottleneck → fix → result
+
+**Baseline** (bare engine, no risk/intervention wiring), 1440-simulated-
+minute runs, entity counts scaled proportionally to the target order count:
+
+| target orders | actual | wall time | orders/sec |
+|---|---|---|---|
+| 1,000 | 993 | 0.042s | 23,905 |
+| 10,000 | 9,857 | 0.777s | 12,679 |
+| 100,000 | 100,156 | 49.088s | 2,040 |
+
+Throughput *fell* more than 10x going from 1K to 100K — not the flat/near-
+linear scaling a tick-based simulation should show. That's a red flag worth
+chasing before ever citing a "handles 100K deliveries" number.
+
+**Bottleneck, found by profiling (`cProfile`) the 100K run**: 92% of total
+runtime (118s of 129s) was `_nearest_available_driver` — on every driver
+assignment attempt, it filtered *every* driver in the marketplace
+(`[d for d in self.drivers.values() if d.is_available]`) to find the
+available ones, then took the nearest. At 100K scale with ~830 drivers and
+~1.48M assignment attempts across the run, that's ~1.2 **billion** calls to
+`Driver.is_available`. Classic O(pending_orders × total_drivers) hiding
+inside what looked like a simple list comprehension.
+
+**Fix**: maintain `self._available_driver_ids` incrementally (a dict-as-
+ordered-set, updated at the handful of places a driver's availability
+actually changes — assigned, freed after delivery/failure/spoilage) instead
+of re-deriving it from scratch on every call. `_nearest_available_driver`
+now only ever iterates over drivers that are actually available.
+
+**Result**, same benchmark, same three targets:
+
+| target orders | actual | wall time | orders/sec | speedup |
+|---|---|---|---|---|
+| 1,000 | 1,009 | 0.037s | 27,629 | 1.1x |
+| 10,000 | 9,936 | 0.346s | 28,738 | 2.2x |
+| 100,000 | 99,923 | 3.936s | 25,388 | **12.5x** |
+
+Throughput is now roughly flat (~25-29K orders/sec) across two orders of
+magnitude — the engine scales the way a tick-based design should. The full
+stack (risk + intervention services attached) went from 57.6s → 12.7s at
+100K (4.5x) — smaller speedup than the bare engine because, once the driver-
+lookup bottleneck was removed, a re-profile showed the remaining time is
+mostly *proportional* work (risk assessment + intervention selection firing
+once per event, ~410K times at 100K scale) rather than a second hidden
+superlinear bottleneck. That remaining cost is inherent to the event-
+reactive design, not a bug — reducing it further would mean changing what
+gets computed (e.g. cheaper risk scoring), not how it's looked up.
+
+### API latency: baseline → bottleneck → fix → result
+
+Against a real running server + real Postgres (not the in-process
+TestClient, which skips actual socket I/O):
+
+| endpoint | before | after |
+|---|---|---|
+| `GET /simulations` | 1.1ms (p50) | — (unchanged) |
+| `GET /simulations/{id}/orders` | 2.5ms | — (unchanged) |
+| `GET /simulations/{id}/metrics` | 1.3ms | — (unchanged) |
+| `GET /simulations/{id}/map` | 17.2ms | — (unchanged) |
+| `GET /simulations/{id}/orders/{id}` | 33.9ms | — (unchanged) |
+| `GET /simulations/{id}/high-risk` | **1782.8ms** | **218.2ms (8.2x)** |
+| `POST /simulations` (~1K orders, 3 strategies + full persistence) | ~1.6s | ~1.6s (not optimized — see below) |
+
+**Bottleneck**: `get_latest_risk_assessments_for_run` (backing the
+high-risk feed) eager-loaded *every* historical risk assessment for *every*
+order in the run via `selectinload`, then picked the newest per order in a
+Python loop — on a 5K-order run with risk reassessed on every event, that's
+~30K assessment rows (each carrying a JSONB factors list) pulled over the
+wire and mostly discarded.
+
+**Fix**: a `ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY computed_at
+DESC)` window-function query, so Postgres picks the latest row per order
+server-side and only that row crosses the wire. Verified independently
+(direct query timing: 0.16s server-side for the same run) before rewriting
+`persistence/repository.py`.
+
+**`POST /simulations` was not optimized** — ~1.6s for a full three-strategy
+comparison (each strategy runs an independent simulation) plus persisting
+one run's full detail is a reasonable cost for a synchronous request at
+this scale, and profiling would be the next step *if* this needs to get
+faster (candidate suspects: running the three strategies concurrently
+instead of sequentially, or batching the persistence inserts) — not
+optimized here because nothing measured points at it being disproportionate
+yet. Consistent with "measure before optimizing": absence of a finding is
+also a finding.
+
+**Likely interview questions**: "How did you find the driver-lookup
+bottleneck?" (`cProfile`, sorted by cumulative time — 92% in one function is
+impossible to miss once you look). "Why a window function instead of just
+caching?" (caching risk assessments would go stale the moment a new event
+fires; the window function reads current data, it just reads *less* of
+it). "What would you profile next if this needed to scale further?"
+(honest answer: `POST /simulations`'s per-row `session.add()` pattern in
+`repository.py` — SQLAlchemy's ORM-level bulk insert is not the fastest way
+to write tens of thousands of rows; `bulk_insert_mappings` or raw
+`COPY`-based loading would be the next thing to measure, not assume).

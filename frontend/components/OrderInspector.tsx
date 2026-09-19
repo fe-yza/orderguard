@@ -5,18 +5,24 @@ import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
 import type { OrderDetailOut } from "@/lib/types";
 
-export function OrderInspector({ orderId }: { orderId: string }) {
+export function OrderInspector({
+  runId,
+  orderId,
+}: {
+  runId: string;
+  orderId: string;
+}) {
   const [order, setOrder] = useState<OrderDetailOut | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api
-      .getOrder(orderId)
+      .getOrder(runId, orderId)
       .then(setOrder)
       .catch((e) =>
         setError(e instanceof ApiError ? `API error ${e.status}: ${e.message}` : String(e)),
       );
-  }, [orderId]);
+  }, [runId, orderId]);
 
   if (error) return <p className="text-[var(--danger)] text-[12px]">{error}</p>;
   if (!order) return <p className="text-[var(--text-dim)] text-[12px]">Loading…</p>;
@@ -27,7 +33,7 @@ export function OrderInspector({ orderId }: { orderId: string }) {
   return (
     <div className="flex flex-col gap-5 max-w-4xl">
       <div>
-        <Link href="/" className="text-[12px] text-[var(--accent)]">
+        <Link href={`/?run=${runId}`} className="text-[12px] text-[var(--accent)]">
           ← Overview
         </Link>
         <h1 className="text-[15px] font-semibold mt-2 mono">{order.id}</h1>

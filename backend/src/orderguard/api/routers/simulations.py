@@ -16,6 +16,7 @@ from orderguard.api.schemas import (
     HighRiskOrderOut,
     MapEntitiesOut,
     MerchantOut,
+    OrderDetailOut,
     OrderSummaryOut,
     RiskAssessmentOut,
     SimulationMetricsOut,
@@ -117,6 +118,21 @@ def get_map_entities(run_id: str, session: Session = Depends(get_session)) -> Ma
             for c in repository.get_customers_for_run(session, run_id)
         ],
     )
+
+
+@router.get("/{run_id}/orders/{order_id}", response_model=OrderDetailOut)
+def get_order(
+    run_id: str, order_id: str, session: Session = Depends(get_session)
+) -> OrderDetailOut:
+    """The Order Inspector's data source: timeline, risk factor history, and
+    every intervention decision (with its full cost-comparison candidates)
+    ever made for this order. Scoped by run_id — order IDs like
+    "order-000042" are only unique within a single run (see
+    `persistence/models.py`), so there is no unscoped lookup."""
+    order = repository.get_order_detail(session, run_id, order_id)
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return OrderDetailOut.model_validate(order)
 
 
 @router.get("/{run_id}/high-risk", response_model=list[HighRiskOrderOut])

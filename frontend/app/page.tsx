@@ -192,7 +192,10 @@ function OverviewInner() {
                 {highRisk.map(({ order, latest_risk_assessment }) => (
                   <tr key={order.id}>
                     <td>
-                      <Link href={`/orders/${order.id}`} className="text-[var(--accent)] mono">
+                      <Link
+                        href={`/simulations/${selectedRunId}/orders/${order.id}`}
+                        className="text-[var(--accent)] mono"
+                      >
                         {order.id}
                       </Link>
                     </td>

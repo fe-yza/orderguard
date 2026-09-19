@@ -71,7 +71,12 @@ export const api = {
   getMapEntities: (runId: string) =>
     request<MapEntitiesOut>(`/simulations/${runId}/map`),
 
-  getOrder: (orderId: string) => request<OrderDetailOut>(`/orders/${orderId}`),
+  // Order IDs like "order-000042" are only unique within a single
+  // simulation run (see backend/src/orderguard/persistence/models.py), so
+  // every order lookup must be scoped by run_id — there is no flat
+  // /orders/{id} endpoint.
+  getOrder: (runId: string, orderId: string) =>
+    request<OrderDetailOut>(`/simulations/${runId}/orders/${orderId}`),
 };
 
 export { ApiError };

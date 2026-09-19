@@ -109,11 +109,29 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done and tested
   for manual visual check.
 
 ## Milestone 8 — Tests + Benchmarks
-- [ ] Unit/integration/API coverage: risk calc, intervention selection,
+- [x] Unit/integration/API coverage: risk calc, intervention selection,
       lifecycle transitions, reproducibility, concurrent state changes
-- [ ] Throughput benchmarks at 1K / 10K / 100K orders
-- [ ] API latency benchmarks
-- [ ] Documented: baseline → bottleneck → change → result
+      (111 backend tests; concurrency via `ThreadPoolExecutor` against the
+      real API + Postgres in `tests/test_api.py`)
+- [x] Throughput benchmarks at 1K / 10K / 100K orders
+      (`benchmarks/benchmark_simulation.py`)
+- [x] API latency benchmarks (`benchmarks/benchmark_api_latency.py`, against
+      a real running server + real Postgres, not TestClient)
+- [x] Documented: baseline → bottleneck → change → result — full writeup
+      in `docs/interview-notes.md`'s Benchmarks section. Two real
+      bottlenecks found and fixed this milestone (not fabricated numbers):
+      an O(pending × drivers) driver-lookup scan (12.5x speedup at 100K
+      orders after fixing) and a Python-side "latest per order" grouping
+      that pulled entire risk-assessment histories over the wire (8.2x
+      speedup after replacing it with a `ROW_NUMBER()` window-function
+      query).
+- Two real correctness bugs found via benchmarking (not by inspection) and
+  fixed with schema/API changes, not workarounds: merchant/driver/customer/
+  order IDs collided across different simulation runs (composite
+  `(simulation_run_id, id)` keys throughout `persistence/models.py`), and
+  `GET /orders/{id}` was unscoped and became ambiguous once that fix landed
+  (moved to `GET /simulations/{run_id}/orders/{order_id}`, frontend updated
+  to match). See `docs/interview-notes.md` for the full story.
 
 ## Milestone 9 — Docker + CI + README
 - [ ] `docker compose up` works end to end

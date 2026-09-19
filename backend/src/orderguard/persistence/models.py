@@ -4,6 +4,19 @@ Mirrors the domain model in `domain/` but is a separate set of classes, not
 a reuse of the dataclasses there — the domain layer stays free of any
 persistence-framework dependency (see `docs/architecture.md`). Conversion
 between the two lives in `persistence/repository.py`.
+
+Composite keys, not plain `id`: the simulation's generated IDs
+("merchant-0003", "order-000042", ...) are only unique *within a single
+run* — every `SimulationEngine` restarts its counters from zero (see
+`simulation/generators.py`). A bare `id` primary key on `merchants`,
+`drivers`, `customers`, `orders`, and `deliveries` would collide the moment
+a second run is persisted (found the hard way: benchmarking by running the
+API repeatedly hit a `UniqueViolation` on `customers_pkey`). Every one of
+those tables' primary key — and every foreign key pointing at one of
+them — is therefore `(simulation_run_id, id)`, not `id` alone.
+`risk_assessments` and `intervention_decisions` are the exception: their
+IDs are UUIDs generated in `risk/models.py` / `interventions/models.py`,
+already globally unique, so a plain single-column key is correct there.
 """
 
 from __future__ import annotations
@@ -11,7 +24,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKey, ForeignKeyConstraint, PrimaryKeyConstraint, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -70,9 +83,10 @@ class SimulationRunRecord(Base):
 
 class MerchantRecord(Base):
     __tablename__ = "merchants"
+    __table_args__ = (PrimaryKeyConstraint("simulation_run_id", "id"),)
 
-    id: Mapped[str] = mapped_column(primary_key=True)
     simulation_run_id: Mapped[str] = mapped_column(ForeignKey("simulation_runs.id"))
+    id: Mapped[str]
     name: Mapped[str]
     location_x_km: Mapped[float]
     location_y_km: Mapped[float]
@@ -87,9 +101,10 @@ class MerchantRecord(Base):
 
 class DriverRecord(Base):
     __tablename__ = "drivers"
+    __table_args__ = (PrimaryKeyConstraint("simulation_run_id", "id"),)
 
-    id: Mapped[str] = mapped_column(primary_key=True)
     simulation_run_id: Mapped[str] = mapped_column(ForeignKey("simulation_runs.id"))
+    id: Mapped[str]
     name: Mapped[str]
     location_x_km: Mapped[float]
     location_y_km: Mapped[float]
@@ -102,9 +117,10 @@ class DriverRecord(Base):
 
 class CustomerRecord(Base):
     __tablename__ = "customers"
+    __table_args__ = (PrimaryKeyConstraint("simulation_run_id", "id"),)
 
-    id: Mapped[str] = mapped_column(primary_key=True)
     simulation_run_id: Mapped[str] = mapped_column(ForeignKey("simulation_runs.id"))
+    id: Mapped[str]
     name: Mapped[str]
     location_x_km: Mapped[float]
     location_y_km: Mapped[float]
@@ -115,11 +131,20 @@ class CustomerRecord(Base):
 
 class OrderRecord(Base):
     __tablename__ = "orders"
+    __table_args__ = (
+        PrimaryKeyConstraint("simulation_run_id", "id"),
+        ForeignKeyConstraint(
+            ["simulation_run_id", "merchant_id"], ["merchants.simulation_run_id", "merchants.id"]
+        ),
+        ForeignKeyConstraint(
+            ["simulation_run_id", "customer_id"], ["customers.simulation_run_id", "customers.id"]
+        ),
+    )
 
-    id: Mapped[str] = mapped_column(primary_key=True)
     simulation_run_id: Mapped[str] = mapped_column(ForeignKey("simulation_runs.id"))
-    merchant_id: Mapped[str] = mapped_column(ForeignKey("merchants.id"))
-    customer_id: Mapped[str] = mapped_column(ForeignKey("customers.id"))
+    id: Mapped[str]
+    merchant_id: Mapped[str]
+    customer_id: Mapped[str]
     created_at: Mapped[datetime]
     promised_delivery_time: Mapped[datetime]
     item_count: Mapped[int]
@@ -156,10 +181,21 @@ class OrderRecord(Base):
 
 class DeliveryRecord(Base):
     __tablename__ = "deliveries"
+    __table_args__ = (
+        PrimaryKeyConstraint("simulation_run_id", "id"),
+        UniqueConstraint("simulation_run_id", "order_id"),
+        ForeignKeyConstraint(
+            ["simulation_run_id", "order_id"], ["orders.simulation_run_id", "orders.id"]
+        ),
+        ForeignKeyConstraint(
+            ["simulation_run_id", "driver_id"], ["drivers.simulation_run_id", "drivers.id"]
+        ),
+    )
 
-    id: Mapped[str] = mapped_column(primary_key=True)
-    order_id: Mapped[str] = mapped_column(ForeignKey("orders.id"), unique=True)
-    driver_id: Mapped[str] = mapped_column(ForeignKey("drivers.id"))
+    simulation_run_id: Mapped[str] = mapped_column(ForeignKey("simulation_runs.id"))
+    id: Mapped[str]
+    order_id: Mapped[str]
+    driver_id: Mapped[str]
     merchant_id: Mapped[str]
     customer_id: Mapped[str]
     assigned_at: Mapped[datetime]
@@ -169,9 +205,15 @@ class DeliveryRecord(Base):
 
 class DeliveryEventRecord(Base):
     __tablename__ = "delivery_events"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["simulation_run_id", "order_id"], ["orders.simulation_run_id", "orders.id"]
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    order_id: Mapped[str] = mapped_column(ForeignKey("orders.id"))
+    simulation_run_id: Mapped[str] = mapped_column(ForeignKey("simulation_runs.id"))
+    order_id: Mapped[str]
     delivery_id: Mapped[str | None]
     event_type: Mapped[EventType] = mapped_column(_str_enum(EventType, "event_type"))
     occurred_at: Mapped[datetime]
@@ -182,9 +224,15 @@ class DeliveryEventRecord(Base):
 
 class RiskAssessmentRecord(Base):
     __tablename__ = "risk_assessments"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["simulation_run_id", "order_id"], ["orders.simulation_run_id", "orders.id"]
+        ),
+    )
 
     id: Mapped[str] = mapped_column(primary_key=True)
-    order_id: Mapped[str] = mapped_column(ForeignKey("orders.id"))
+    simulation_run_id: Mapped[str] = mapped_column(ForeignKey("simulation_runs.id"))
+    order_id: Mapped[str]
     delivery_id: Mapped[str | None]
     computed_at: Mapped[datetime]
     overall_risk_score: Mapped[float]
@@ -200,9 +248,15 @@ class RiskAssessmentRecord(Base):
 
 class InterventionDecisionRecord(Base):
     __tablename__ = "intervention_decisions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["simulation_run_id", "order_id"], ["orders.simulation_run_id", "orders.id"]
+        ),
+    )
 
     id: Mapped[str] = mapped_column(primary_key=True)
-    order_id: Mapped[str] = mapped_column(ForeignKey("orders.id"))
+    simulation_run_id: Mapped[str] = mapped_column(ForeignKey("simulation_runs.id"))
+    order_id: Mapped[str]
     delivery_id: Mapped[str | None]
     risk_assessment_id: Mapped[str] = mapped_column(ForeignKey("risk_assessments.id"))
     computed_at: Mapped[datetime]

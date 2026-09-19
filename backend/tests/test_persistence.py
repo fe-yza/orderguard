@@ -103,13 +103,11 @@ class TestPersistenceRoundTrip:
             intervention_history=intervention_service.history,
         )
         any_order_id = next(iter(run.orders))
-        detail = repository.get_order_detail(db_session, any_order_id)
+        detail = repository.get_order_detail(db_session, run.id, any_order_id)
         assert detail is not None
         assert len(detail.events) > 0
         assert len(detail.risk_assessments) == len(risk_service.history[any_order_id])
-        assert len(detail.intervention_decisions) == len(
-            intervention_service.history[any_order_id]
-        )
+        assert len(detail.intervention_decisions) == len(intervention_service.history[any_order_id])
 
     def test_latest_risk_assessments_sorted_and_filtered(self, db_session):
         run, risk_service, intervention_service = _run_full_stack(seed=5)
@@ -147,3 +145,41 @@ class TestPersistenceRoundTrip:
         assert fetched[0].strategy == "expected_value"
         assert fetched[0].total_orders == metrics.total_orders
         assert fetched[0].late_rate == metrics.late_rate
+
+
+class TestMultipleRunsDoNotCollide:
+    def test_two_runs_persist_without_id_collision(self, db_session):
+        # Regression test: merchant/driver/customer/order IDs are only
+        # unique *within* a single run (every SimulationEngine restarts its
+        # counters from zero), so persisting a second run used to raise a
+        # UniqueViolation on e.g. customers_pkey once composite keys weren't
+        # in place. Found via the API latency benchmark hitting POST
+        # /simulations repeatedly against the same database.
+        run_a, risk_a, intervention_a = _run_full_stack(seed=10)
+        run_b, risk_b, intervention_b = _run_full_stack(seed=11)
+
+        repository.save_simulation_run(
+            db_session,
+            run_a,
+            risk_history=risk_a.history,
+            intervention_history=intervention_a.history,
+        )
+        repository.save_simulation_run(
+            db_session,
+            run_b,
+            risk_history=risk_b.history,
+            intervention_history=intervention_b.history,
+        )
+
+        fetched_a = repository.get_simulation_run(db_session, run_a.id)
+        fetched_b = repository.get_simulation_run(db_session, run_b.id)
+        assert fetched_a is not None and fetched_b is not None
+        assert len(fetched_a.orders) == len(run_a.orders)
+        assert len(fetched_b.orders) == len(run_b.orders)
+
+        # Same merchant "local" id (e.g. "merchant-0000") exists in both
+        # runs, correctly scoped as distinct rows.
+        merchants_a = {m.id for m in repository.get_merchants_for_run(db_session, run_a.id)}
+        merchants_b = {m.id for m in repository.get_merchants_for_run(db_session, run_b.id)}
+        assert merchants_a == merchants_b  # same generated local IDs
+        assert len(merchants_a) > 0

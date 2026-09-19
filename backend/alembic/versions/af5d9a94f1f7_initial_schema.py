@@ -1,8 +1,8 @@
 """initial schema
 
-Revision ID: 04cf546269d3
+Revision ID: af5d9a94f1f7
 Revises: 
-Create Date: 2026-09-18 19:33:58.205142
+Create Date: 2026-09-18 21:38:08.785770
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '04cf546269d3'
+revision: str = 'af5d9a94f1f7'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -31,18 +31,18 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('customers',
-    sa.Column('id', sa.String(), nullable=False),
     sa.Column('simulation_run_id', sa.String(), nullable=False),
+    sa.Column('id', sa.String(), nullable=False),
     sa.Column('name', sa.String(), nullable=False),
     sa.Column('location_x_km', sa.Float(), nullable=False),
     sa.Column('location_y_km', sa.Float(), nullable=False),
     sa.Column('reachability_score', sa.Float(), nullable=False),
     sa.ForeignKeyConstraint(['simulation_run_id'], ['simulation_runs.id'], ),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('simulation_run_id', 'id')
     )
     op.create_table('drivers',
-    sa.Column('id', sa.String(), nullable=False),
     sa.Column('simulation_run_id', sa.String(), nullable=False),
+    sa.Column('id', sa.String(), nullable=False),
     sa.Column('name', sa.String(), nullable=False),
     sa.Column('location_x_km', sa.Float(), nullable=False),
     sa.Column('location_y_km', sa.Float(), nullable=False),
@@ -50,11 +50,11 @@ def upgrade() -> None:
     sa.Column('reliability_score', sa.Float(), nullable=False),
     sa.Column('final_status', sa.String(), nullable=False),
     sa.ForeignKeyConstraint(['simulation_run_id'], ['simulation_runs.id'], ),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('simulation_run_id', 'id')
     )
     op.create_table('merchants',
-    sa.Column('id', sa.String(), nullable=False),
     sa.Column('simulation_run_id', sa.String(), nullable=False),
+    sa.Column('id', sa.String(), nullable=False),
     sa.Column('name', sa.String(), nullable=False),
     sa.Column('location_x_km', sa.Float(), nullable=False),
     sa.Column('location_y_km', sa.Float(), nullable=False),
@@ -64,7 +64,7 @@ def upgrade() -> None:
     sa.Column('reliability_score', sa.Float(), nullable=False),
     sa.Column('final_backlog', sa.Integer(), nullable=False),
     sa.ForeignKeyConstraint(['simulation_run_id'], ['simulation_runs.id'], ),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('simulation_run_id', 'id')
     )
     op.create_table('simulation_metrics',
     sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
@@ -91,8 +91,8 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('orders',
-    sa.Column('id', sa.String(), nullable=False),
     sa.Column('simulation_run_id', sa.String(), nullable=False),
+    sa.Column('id', sa.String(), nullable=False),
     sa.Column('merchant_id', sa.String(), nullable=False),
     sa.Column('customer_id', sa.String(), nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=False),
@@ -103,35 +103,40 @@ def upgrade() -> None:
     sa.Column('delivered_at', sa.DateTime(), nullable=True),
     sa.Column('cancellation_reason', sa.Enum('merchant_out_of_stock', 'no_driver_available', 'customer_changed_mind', name='cancellation_reason'), nullable=True),
     sa.Column('failure_reason', sa.Enum('driver_never_arrived', 'never_picked_up', 'damaged_or_spoiled', 'customer_unreachable', name='failure_reason'), nullable=True),
-    sa.ForeignKeyConstraint(['customer_id'], ['customers.id'], ),
-    sa.ForeignKeyConstraint(['merchant_id'], ['merchants.id'], ),
+    sa.ForeignKeyConstraint(['simulation_run_id', 'customer_id'], ['customers.simulation_run_id', 'customers.id'], ),
+    sa.ForeignKeyConstraint(['simulation_run_id', 'merchant_id'], ['merchants.simulation_run_id', 'merchants.id'], ),
     sa.ForeignKeyConstraint(['simulation_run_id'], ['simulation_runs.id'], ),
-    sa.PrimaryKeyConstraint('id')
+    sa.PrimaryKeyConstraint('simulation_run_id', 'id')
     )
     op.create_table('deliveries',
+    sa.Column('simulation_run_id', sa.String(), nullable=False),
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('order_id', sa.String(), nullable=False),
     sa.Column('driver_id', sa.String(), nullable=False),
     sa.Column('merchant_id', sa.String(), nullable=False),
     sa.Column('customer_id', sa.String(), nullable=False),
     sa.Column('assigned_at', sa.DateTime(), nullable=False),
-    sa.ForeignKeyConstraint(['driver_id'], ['drivers.id'], ),
-    sa.ForeignKeyConstraint(['order_id'], ['orders.id'], ),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('order_id')
+    sa.ForeignKeyConstraint(['simulation_run_id', 'driver_id'], ['drivers.simulation_run_id', 'drivers.id'], ),
+    sa.ForeignKeyConstraint(['simulation_run_id', 'order_id'], ['orders.simulation_run_id', 'orders.id'], ),
+    sa.ForeignKeyConstraint(['simulation_run_id'], ['simulation_runs.id'], ),
+    sa.PrimaryKeyConstraint('simulation_run_id', 'id'),
+    sa.UniqueConstraint('simulation_run_id', 'order_id')
     )
     op.create_table('delivery_events',
     sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
+    sa.Column('simulation_run_id', sa.String(), nullable=False),
     sa.Column('order_id', sa.String(), nullable=False),
     sa.Column('delivery_id', sa.String(), nullable=True),
     sa.Column('event_type', sa.Enum('order_created', 'order_confirmed', 'order_cancelled', 'driver_assigned', 'driver_en_route_to_merchant', 'driver_arrived_at_merchant', 'order_picked_up', 'driver_en_route_to_customer', 'order_delivered', 'order_failed', 'driver_went_offline', name='event_type'), nullable=False),
     sa.Column('occurred_at', sa.DateTime(), nullable=False),
     sa.Column('details', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
-    sa.ForeignKeyConstraint(['order_id'], ['orders.id'], ),
+    sa.ForeignKeyConstraint(['simulation_run_id', 'order_id'], ['orders.simulation_run_id', 'orders.id'], ),
+    sa.ForeignKeyConstraint(['simulation_run_id'], ['simulation_runs.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('risk_assessments',
     sa.Column('id', sa.String(), nullable=False),
+    sa.Column('simulation_run_id', sa.String(), nullable=False),
     sa.Column('order_id', sa.String(), nullable=False),
     sa.Column('delivery_id', sa.String(), nullable=True),
     sa.Column('computed_at', sa.DateTime(), nullable=False),
@@ -140,11 +145,13 @@ def upgrade() -> None:
     sa.Column('confidence', sa.Float(), nullable=False),
     sa.Column('predicted_delay_minutes', sa.Float(), nullable=False),
     sa.Column('factors', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
-    sa.ForeignKeyConstraint(['order_id'], ['orders.id'], ),
+    sa.ForeignKeyConstraint(['simulation_run_id', 'order_id'], ['orders.simulation_run_id', 'orders.id'], ),
+    sa.ForeignKeyConstraint(['simulation_run_id'], ['simulation_runs.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('intervention_decisions',
     sa.Column('id', sa.String(), nullable=False),
+    sa.Column('simulation_run_id', sa.String(), nullable=False),
     sa.Column('order_id', sa.String(), nullable=False),
     sa.Column('delivery_id', sa.String(), nullable=True),
     sa.Column('risk_assessment_id', sa.String(), nullable=False),
@@ -152,8 +159,9 @@ def upgrade() -> None:
     sa.Column('chosen', sa.Enum('do_nothing', 'update_eta', 'notify_customer', 'notify_merchant', 'merchant_escalation', 'offer_credit', 'reassign_driver', name='intervention_type'), nullable=False),
     sa.Column('rationale', sa.String(), nullable=False),
     sa.Column('candidates', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
-    sa.ForeignKeyConstraint(['order_id'], ['orders.id'], ),
     sa.ForeignKeyConstraint(['risk_assessment_id'], ['risk_assessments.id'], ),
+    sa.ForeignKeyConstraint(['simulation_run_id', 'order_id'], ['orders.simulation_run_id', 'orders.id'], ),
+    sa.ForeignKeyConstraint(['simulation_run_id'], ['simulation_runs.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     # ### end Alembic commands ###

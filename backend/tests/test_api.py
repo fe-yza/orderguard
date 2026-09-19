@@ -1,3 +1,5 @@
+from concurrent.futures import ThreadPoolExecutor
+
 from fastapi.testclient import TestClient
 
 from orderguard.api.app import create_app
@@ -122,7 +124,7 @@ class TestOrderEndpoint:
         orders = client.get(f"/simulations/{run_id}/orders", params={"limit": 1}).json()
         order_id = orders[0]["id"]
 
-        response = client.get(f"/orders/{order_id}")
+        response = client.get(f"/simulations/{run_id}/orders/{order_id}")
         assert response.status_code == 200
         detail = response.json()
         assert detail["id"] == order_id
@@ -131,5 +133,60 @@ class TestOrderEndpoint:
         assert len(detail["intervention_decisions"]) > 0
 
     def test_unknown_order_404s(self, db_session):
-        response = client.get("/orders/does-not-exist")
+        body = _create_experiment(seed=109)
+        run_id = body["simulation_run_id"]
+        response = client.get(f"/simulations/{run_id}/orders/does-not-exist")
         assert response.status_code == 404
+
+    def test_same_order_id_across_two_runs_resolves_independently(self, db_session):
+        # Regression test: order/merchant/driver/customer IDs are only
+        # unique within a single run (see persistence/models.py), so two
+        # different runs' "order-000000" must resolve to two different,
+        # correctly-scoped orders rather than an ambiguous/incorrect match.
+        body_a = _create_experiment(seed=110)
+        body_b = _create_experiment(seed=111)
+        run_a, run_b = body_a["simulation_run_id"], body_b["simulation_run_id"]
+
+        detail_a = client.get(f"/simulations/{run_a}/orders/order-000000").json()
+        detail_b = client.get(f"/simulations/{run_b}/orders/order-000000").json()
+        assert detail_a["id"] == detail_b["id"] == "order-000000"
+        # Different runs, so (almost certainly) different merchant/customer
+        # assignments or timestamps -- the two responses aren't identical.
+        assert detail_a != detail_b
+
+
+class TestConcurrentRequests:
+    def test_concurrent_experiment_creation_does_not_corrupt_state(self, db_session):
+        # Each request gets its own DB session (FastAPI's per-request
+        # dependency injection via get_session), and simulation_run_id is a
+        # UUID, so concurrent POSTs should never collide or corrupt each
+        # other's rows -- this is the same composite-key correctness
+        # regression tested sequentially in test_same_order_id_across_two_
+        # runs_resolves_independently, but under real concurrent access
+        # rather than one request at a time.
+        seeds = list(range(200, 208))
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            bodies = list(pool.map(_create_experiment, seeds))
+
+        run_ids = [b["simulation_run_id"] for b in bodies]
+        assert len(set(run_ids)) == len(run_ids)  # all distinct
+
+        for run_id in run_ids:
+            response = client.get(f"/simulations/{run_id}")
+            assert response.status_code == 200
+            orders = client.get(f"/simulations/{run_id}/orders", params={"limit": 5}).json()
+            assert len(orders) > 0
+            detail = client.get(f"/simulations/{run_id}/orders/{orders[0]['id']}").json()
+            assert detail["id"] == orders[0]["id"]
+
+    def test_concurrent_reads_of_same_run_are_consistent(self, db_session):
+        body = _create_experiment(seed=209)
+        run_id = body["simulation_run_id"]
+
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            responses = list(
+                pool.map(lambda _: client.get(f"/simulations/{run_id}/metrics"), range(20))
+            )
+        assert all(r.status_code == 200 for r in responses)
+        payloads = [r.json() for r in responses]
+        assert all(p == payloads[0] for p in payloads)

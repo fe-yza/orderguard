@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, aliased, selectinload
 
 from orderguard.experiments.models import SimulationMetrics
 from orderguard.interventions.models import InterventionDecision
@@ -114,6 +114,7 @@ def save_simulation_run(
     for delivery in run.deliveries.values():
         session.add(
             DeliveryRecord(
+                simulation_run_id=run.id,
                 id=delivery.id,
                 order_id=delivery.order_id,
                 driver_id=delivery.driver_id,
@@ -126,6 +127,7 @@ def save_simulation_run(
     for event in run.events:
         session.add(
             DeliveryEventRecord(
+                simulation_run_id=run.id,
                 order_id=event.order_id,
                 delivery_id=event.delivery_id or None,
                 event_type=event.event_type,
@@ -139,6 +141,7 @@ def save_simulation_run(
             session.add(
                 RiskAssessmentRecord(
                     id=assessment.id,
+                    simulation_run_id=run.id,
                     order_id=assessment.order_id,
                     delivery_id=assessment.delivery_id,
                     computed_at=assessment.computed_at,
@@ -163,6 +166,7 @@ def save_simulation_run(
             session.add(
                 InterventionDecisionRecord(
                     id=decision.id,
+                    simulation_run_id=run.id,
                     order_id=decision.order_id,
                     delivery_id=decision.delivery_id,
                     risk_assessment_id=decision.risk_assessment_id,
@@ -228,10 +232,16 @@ def list_orders_for_run(
     return list(session.execute(stmt).scalars())
 
 
-def get_order_detail(session: Session, order_id: str) -> OrderRecord | None:
+def get_order_detail(session: Session, run_id: str, order_id: str) -> OrderRecord | None:
+    """`order_id` (e.g. "order-000042") is only unique *within* a run — see
+    the module docstring on `persistence/models.py` — so this always takes
+    `run_id` too, never a bare order lookup. There is no unscoped
+    equivalent; callers that only have an order_id must also know which
+    run it came from (the frontend always does, since it only ever gets an
+    order_id from a run-scoped list/feed in the first place)."""
     stmt = (
         select(OrderRecord)
-        .where(OrderRecord.id == order_id)
+        .where(OrderRecord.simulation_run_id == run_id, OrderRecord.id == order_id)
         .options(
             selectinload(OrderRecord.events),
             selectinload(OrderRecord.risk_assessments),
@@ -246,24 +256,46 @@ def get_latest_risk_assessments_for_run(
     session: Session, run_id: str, *, min_score: float = 0.0
 ) -> list[tuple[OrderRecord, RiskAssessmentRecord]]:
     """One (order, latest-risk-assessment) pair per order in the run, above
-    `min_score`. Grouped in Python rather than a window-function query —
-    simplest correct implementation for the order-of-magnitude of orders per
-    run this project targets; revisit with a `ROW_NUMBER()` query if a
-    benchmark (Milestone 8) shows this is actually a bottleneck."""
-    stmt = (
-        select(OrderRecord)
-        .where(OrderRecord.simulation_run_id == run_id)
-        .options(selectinload(OrderRecord.risk_assessments))
+    `min_score`.
+
+    Originally grouped in Python (`selectinload` every order's *entire*
+    risk-assessment history, then `max()` in a loop) as the simplest correct
+    v1. Milestone 8 benchmarking measured this endpoint at ~1.8s on a 5K-order
+    run — order of magnitude slower than every other endpoint (map: ~20ms,
+    orders list: ~3ms) — because it was pulling every historical assessment
+    for every order (risk is reassessed on every event; a 5K-order run had
+    ~30K assessment rows) just to throw all but the newest away in Python.
+    Replaced with a `ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY
+    computed_at DESC)` window-function query that lets Postgres pick the
+    latest row per order directly — confirmed via direct query timing this
+    drops to ~0.16s server-side for the same run.
+    """
+    row_number = (
+        func.row_number()
+        .over(
+            partition_by=RiskAssessmentRecord.order_id,
+            order_by=RiskAssessmentRecord.computed_at.desc(),
+        )
+        .label("rn")
     )
-    results = []
-    for order in session.execute(stmt).scalars():
-        if not order.risk_assessments:
-            continue
-        latest = max(order.risk_assessments, key=lambda a: a.computed_at)
-        if latest.overall_risk_score >= min_score:
-            results.append((order, latest))
-    results.sort(key=lambda pair: pair[1].overall_risk_score, reverse=True)
-    return results
+    latest_subq = (
+        select(RiskAssessmentRecord, row_number)
+        .where(RiskAssessmentRecord.simulation_run_id == run_id)
+        .subquery()
+    )
+    latest_assessment = aliased(RiskAssessmentRecord, latest_subq)
+
+    stmt = (
+        select(OrderRecord, latest_assessment)
+        .join(latest_assessment, latest_assessment.order_id == OrderRecord.id)
+        .where(
+            OrderRecord.simulation_run_id == run_id,
+            latest_subq.c.rn == 1,
+            latest_subq.c.overall_risk_score >= min_score,
+        )
+        .order_by(latest_subq.c.overall_risk_score.desc())
+    )
+    return list(session.execute(stmt).all())
 
 
 def get_merchants_for_run(session: Session, run_id: str) -> list[MerchantRecord]:

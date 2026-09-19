@@ -88,6 +88,17 @@ class SimulationEngine:
 
         self._risk_multiplier: dict[str, float] = {}
 
+        # Ordered set (dict-as-set, for deterministic insertion-order
+        # iteration — see the `sorted()` comment in `_apply_hazards`; a
+        # plain `set` would reintroduce the same per-process hash-seed
+        # non-determinism) of currently-available driver IDs. Maintained
+        # incrementally rather than filtering `self.drivers.values()` on
+        # every assignment attempt — profiling a 100K-order run showed the
+        # naive filter-scan (`_nearest_available_driver` re-scanning every
+        # driver each call) was 92% of total runtime, dominated by ~1.2B
+        # calls to `Driver.is_available`. See `docs/interview-notes.md`.
+        self._available_driver_ids: dict[str, None] = dict.fromkeys(self.drivers)
+
     # -- intervention feedback ---------------------------------------------
 
     def apply_intervention_effect(self, order_id: str, probability_reduction: float) -> None:
@@ -281,6 +292,7 @@ class SimulationEngine:
             driver.status = DriverStatus.EN_ROUTE
             driver.current_delivery_id = delivery.id
             driver.idle_minutes = 0.0
+            del self._available_driver_ids[driver.id]
 
             order.transition_to(OrderStatus.ASSIGNED, at=now)
             self._record(order, EventType.DRIVER_ASSIGNED, driver_id=driver.id)
@@ -292,10 +304,13 @@ class SimulationEngine:
         self._awaiting_assignment = still_waiting
 
     def _nearest_available_driver(self, near: Point) -> Driver | None:
-        available = [d for d in self.drivers.values() if d.is_available]
-        if not available:
+        if not self._available_driver_ids:
             return None
-        return min(available, key=lambda d: d.location.distance_to(near))
+        nearest_id = min(
+            self._available_driver_ids,
+            key=lambda driver_id: self.drivers[driver_id].location.distance_to(near),
+        )
+        return self.drivers[nearest_id]
 
     # -- hazards (offline drivers, spoilage, unreachable customers) --------
 
@@ -374,6 +389,7 @@ class SimulationEngine:
         self._en_route_to_customer.discard(order_id)
         driver.status = DriverStatus.AVAILABLE
         driver.current_delivery_id = None
+        self._available_driver_ids[driver.id] = None
 
     # -- prep and travel progression ---------------------------------------
 
@@ -470,6 +486,7 @@ class SimulationEngine:
             self._en_route_to_customer.discard(order_id)
             driver.status = DriverStatus.AVAILABLE
             driver.current_delivery_id = None
+            self._available_driver_ids[driver.id] = None
 
 
 def _minutes(value: float) -> timedelta:
