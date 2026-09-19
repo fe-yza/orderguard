@@ -9,11 +9,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from orderguard.api.schemas import (
+    TERMINAL_STATUS_VALUES,
     CustomerOut,
     DriverOut,
     ExperimentRequest,
     ExperimentResponseOut,
     HighRiskOrderOut,
+    MapDeliveryOut,
     MapEntitiesOut,
     MerchantOut,
     OrderDetailOut,
@@ -116,6 +118,27 @@ def get_map_entities(run_id: str, session: Session = Depends(get_session)) -> Ma
         customers=[
             CustomerOut.model_validate(c)
             for c in repository.get_customers_for_run(session, run_id)
+        ],
+        deliveries=[
+            MapDeliveryOut(
+                order_id=d.order_id,
+                status=d.status,
+                is_perishable=d.is_perishable,
+                is_active=d.status not in TERMINAL_STATUS_VALUES,
+                merchant_id=d.merchant_id,
+                merchant_x_km=d.merchant_x_km,
+                merchant_y_km=d.merchant_y_km,
+                customer_id=d.customer_id,
+                customer_x_km=d.customer_x_km,
+                customer_y_km=d.customer_y_km,
+                driver_id=d.driver_id,
+                driver_x_km=d.driver_x_km,
+                driver_y_km=d.driver_y_km,
+                driver_status=d.driver_status,
+                latest_risk_score=d.latest_risk_score,
+                predicted_failure_type=d.predicted_failure_type,
+            )
+            for d in repository.get_delivery_map_for_run(session, run_id)
         ],
     )
 

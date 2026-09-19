@@ -116,6 +116,44 @@ class TestSimulationEndpoints:
         response = client.get("/simulations/does-not-exist/map")
         assert response.status_code == 404
 
+    def test_map_endpoint_includes_deliveries_with_valid_endpoints(self, db_session):
+        body = _create_experiment(seed=112)
+        run_id = body["simulation_run_id"]
+        entities = client.get(f"/simulations/{run_id}/map").json()
+
+        orders = client.get(f"/simulations/{run_id}/orders", params={"limit": 10000}).json()
+        assert len(entities["deliveries"]) == len(orders)
+
+        merchant_ids = {m["id"] for m in entities["merchants"]}
+        customer_ids = {c["id"] for c in entities["customers"]}
+        driver_ids = {d["id"] for d in entities["drivers"]}
+
+        active_count = 0
+        risk_scored_count = 0
+        driver_assigned_count = 0
+        for delivery in entities["deliveries"]:
+            assert delivery["merchant_id"] in merchant_ids
+            assert delivery["customer_id"] in customer_ids
+            assert delivery["is_active"] == (
+                delivery["status"] not in ("delivered", "failed", "cancelled")
+            )
+            if delivery["is_active"]:
+                active_count += 1
+            if delivery["latest_risk_score"] is not None:
+                risk_scored_count += 1
+                assert 0 <= delivery["latest_risk_score"] <= 100
+            if delivery["driver_id"] is not None:
+                driver_assigned_count += 1
+                assert delivery["driver_id"] in driver_ids
+                assert delivery["driver_x_km"] is not None
+                assert delivery["driver_status"] is not None
+
+        # Every order that was ever confirmed gets an initial risk
+        # assessment, so this should cover almost all orders.
+        assert risk_scored_count > 0
+        assert driver_assigned_count > 0
+        assert active_count >= 0  # some runs finish with nothing in flight
+
 
 class TestOrderEndpoint:
     def test_order_detail_has_timeline_and_risk(self, db_session):

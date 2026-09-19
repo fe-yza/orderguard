@@ -2,18 +2,41 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Legend,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { api, ApiError } from "@/lib/api";
-import type { ExperimentResponseOut, SimulationConfigIn } from "@/lib/types";
+import type { ExperimentResponseOut, RushHourWindowIn, SimulationConfigIn } from "@/lib/types";
 
 const DEFAULT_CONFIG: SimulationConfigIn = {
   seed: 42,
   start_time: "2026-01-01T08:00:00",
-  duration_minutes: 300,
-  num_merchants: 15,
-  num_drivers: 25,
-  num_customers: 200,
+  duration_minutes: 480,
+  num_merchants: 20,
+  num_drivers: 35,
+  num_customers: 300,
   base_order_rate_per_minute: 1.0,
   map_size_km: 10.0,
+  avg_merchant_prep_minutes: 12.0,
+  merchant_prep_stddev_minutes: 3.0,
+  driver_offline_probability_per_tick: 0.0008,
+  merchant_stockout_probability: 0.03,
+  customer_unreachable_probability: 0.02,
+  perishable_spoilage_probability_per_tick: 0.05,
+};
+
+const DEFAULT_RUSH_HOUR: RushHourWindowIn = {
+  start_minute: 60,
+  end_minute: 180,
+  demand_multiplier: 1.8,
+  speed_multiplier: 0.65,
 };
 
 const STRATEGY_LABEL: Record<string, string> = {
@@ -22,11 +45,21 @@ const STRATEGY_LABEL: Record<string, string> = {
   expected_value: "OrderGuard (expected-value)",
 };
 
+const STRATEGY_COLOR: Record<string, string> = {
+  no_intervention: "#5b6270",
+  threshold_based: "#e0a83c",
+  expected_value: "#5b9dff",
+};
+
+type RunStatus = "idle" | "running" | "success" | "error";
+
 export default function SimulationLabPage() {
   const router = useRouter();
   const [config, setConfig] = useState<SimulationConfigIn>(DEFAULT_CONFIG);
   const [threshold, setThreshold] = useState(50);
-  const [running, setRunning] = useState(false);
+  const [rushHourEnabled, setRushHourEnabled] = useState(false);
+  const [rushHour, setRushHour] = useState<RushHourWindowIn>(DEFAULT_RUSH_HOUR);
+  const [status, setStatus] = useState<RunStatus>("idle");
   const [result, setResult] = useState<ExperimentResponseOut | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,33 +70,55 @@ export default function SimulationLabPage() {
     setConfig((c) => ({ ...c, [key]: value }));
   }
 
+  function updateRushHour<K extends keyof RushHourWindowIn>(key: K, value: RushHourWindowIn[K]) {
+    setRushHour((w) => ({ ...w, [key]: value }));
+  }
+
   async function runExperiment() {
-    setRunning(true);
+    setStatus("running");
     setError(null);
     try {
-      const response = await api.createExperiment(config, threshold);
+      const fullConfig: SimulationConfigIn = {
+        ...config,
+        rush_hour_windows: rushHourEnabled ? [rushHour] : [],
+      };
+      const response = await api.createExperiment(fullConfig, threshold);
       setResult(response);
+      setStatus("success");
     } catch (e) {
       setError(e instanceof ApiError ? `API error ${e.status}: ${e.message}` : String(e));
-    } finally {
-      setRunning(false);
+      setStatus("error");
     }
   }
 
+  const chartData = result
+    ? ["late_rate", "failure_rate", "cancellation_rate"].map((key) => ({
+        metric: { late_rate: "Late", failure_rate: "Failed", cancellation_rate: "Cancelled" }[
+          key
+        ],
+        ...Object.fromEntries(
+          result.metrics.map((m) => [
+            m.strategy,
+            Number((m[key as keyof typeof m] as number) * 100).toFixed(2),
+          ]),
+        ),
+      }))
+    : [];
+
   return (
-    <div className="flex flex-col gap-5 max-w-5xl">
+    <div className="flex flex-col gap-5 max-w-6xl">
       <div className="panel p-4">
-        <h1 className="text-[13px] font-semibold mb-3">
-          Configure &amp; run experiment
-        </h1>
+        <h1 className="text-[13px] font-semibold mb-1">Configure &amp; run experiment</h1>
         <p className="text-[12px] text-[var(--text-dim)] mb-4">
           Runs the same seeded marketplace three ways — no intervention,
-          threshold-based, and OrderGuard&apos;s expected-value engine — and
-          compares real, measured outcomes. No fabricated numbers: every value
-          below comes from the run you trigger here.
+          threshold-based, and OrderGuard&apos;s expected-value engine — and reports real,
+          measured outcomes from an actual simulation run. Nothing here is precomputed or
+          fabricated; every field below maps directly to a parameter the backend simulation
+          engine accepts.
         </p>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Field label="Seed">
+
+        <ConfigSection title="Marketplace scale">
+          <Field label="Random seed">
             <input
               type="number"
               className="input"
@@ -71,7 +126,7 @@ export default function SimulationLabPage() {
               onChange={(e) => updateField("seed", Number(e.target.value))}
             />
           </Field>
-          <Field label="Duration (min)">
+          <Field label="Duration (sim. minutes)">
             <input
               type="number"
               className="input"
@@ -87,7 +142,7 @@ export default function SimulationLabPage() {
               onChange={(e) => updateField("num_merchants", Number(e.target.value))}
             />
           </Field>
-          <Field label="Drivers">
+          <Field label="Drivers (supply)">
             <input
               type="number"
               className="input"
@@ -103,17 +158,6 @@ export default function SimulationLabPage() {
               onChange={(e) => updateField("num_customers", Number(e.target.value))}
             />
           </Field>
-          <Field label="Order rate (/min)">
-            <input
-              type="number"
-              step="0.1"
-              className="input"
-              value={config.base_order_rate_per_minute}
-              onChange={(e) =>
-                updateField("base_order_rate_per_minute", Number(e.target.value))
-              }
-            />
-          </Field>
           <Field label="Map size (km)">
             <input
               type="number"
@@ -122,7 +166,144 @@ export default function SimulationLabPage() {
               onChange={(e) => updateField("map_size_km", Number(e.target.value))}
             />
           </Field>
-          <Field label="Intervention threshold">
+        </ConfigSection>
+
+        <ConfigSection title="Demand">
+          <Field label="Order arrival rate (/min)">
+            <input
+              type="number"
+              step="0.1"
+              className="input"
+              value={config.base_order_rate_per_minute}
+              onChange={(e) => updateField("base_order_rate_per_minute", Number(e.target.value))}
+            />
+          </Field>
+          <label className="flex items-center gap-2 text-[11px] text-[var(--text-dim)] self-end pb-1.5">
+            <input
+              type="checkbox"
+              checked={rushHourEnabled}
+              onChange={(e) => setRushHourEnabled(e.target.checked)}
+            />
+            Enable rush-hour window
+          </label>
+          {rushHourEnabled ? (
+            <>
+              <Field label="Rush start (min)">
+                <input
+                  type="number"
+                  className="input"
+                  value={rushHour.start_minute}
+                  onChange={(e) => updateRushHour("start_minute", Number(e.target.value))}
+                />
+              </Field>
+              <Field label="Rush end (min)">
+                <input
+                  type="number"
+                  className="input"
+                  value={rushHour.end_minute}
+                  onChange={(e) => updateRushHour("end_minute", Number(e.target.value))}
+                />
+              </Field>
+              <Field label="Demand multiplier">
+                <input
+                  type="number"
+                  step="0.1"
+                  className="input"
+                  value={rushHour.demand_multiplier}
+                  onChange={(e) => updateRushHour("demand_multiplier", Number(e.target.value))}
+                />
+              </Field>
+              <Field label="Travel speed multiplier">
+                <input
+                  type="number"
+                  step="0.05"
+                  min="0.05"
+                  max="1"
+                  className="input"
+                  value={rushHour.speed_multiplier}
+                  onChange={(e) => updateRushHour("speed_multiplier", Number(e.target.value))}
+                />
+              </Field>
+            </>
+          ) : null}
+        </ConfigSection>
+
+        <ConfigSection title="Merchant behavior">
+          <Field label="Avg prep time (min)">
+            <input
+              type="number"
+              className="input"
+              value={config.avg_merchant_prep_minutes}
+              onChange={(e) => updateField("avg_merchant_prep_minutes", Number(e.target.value))}
+            />
+          </Field>
+          <Field label="Prep time variance (stddev)">
+            <input
+              type="number"
+              className="input"
+              value={config.merchant_prep_stddev_minutes}
+              onChange={(e) =>
+                updateField("merchant_prep_stddev_minutes", Number(e.target.value))
+              }
+            />
+          </Field>
+        </ConfigSection>
+
+        <ConfigSection
+          title="Failure hazard rates (ground truth)"
+          hint="Per-tick probabilities that drive the simulation's real outcomes — turn these up to generate more failure risk for the demo. The risk engine never sees these numbers directly; it only sees observable state."
+        >
+          <Field label="Driver goes offline">
+            <input
+              type="number"
+              step="0.0001"
+              className="input"
+              value={config.driver_offline_probability_per_tick}
+              onChange={(e) =>
+                updateField("driver_offline_probability_per_tick", Number(e.target.value))
+              }
+            />
+          </Field>
+          <Field label="Merchant stockout">
+            <input
+              type="number"
+              step="0.01"
+              className="input"
+              value={config.merchant_stockout_probability}
+              onChange={(e) =>
+                updateField("merchant_stockout_probability", Number(e.target.value))
+              }
+            />
+          </Field>
+          <Field label="Customer unreachable">
+            <input
+              type="number"
+              step="0.01"
+              className="input"
+              value={config.customer_unreachable_probability}
+              onChange={(e) =>
+                updateField("customer_unreachable_probability", Number(e.target.value))
+              }
+            />
+          </Field>
+          <Field label="Perishable spoilage (when late)">
+            <input
+              type="number"
+              step="0.01"
+              className="input"
+              value={config.perishable_spoilage_probability_per_tick}
+              onChange={(e) =>
+                updateField("perishable_spoilage_probability_per_tick", Number(e.target.value))
+              }
+            />
+          </Field>
+        </ConfigSection>
+
+        <ConfigSection
+          title="Baseline policy"
+          hint="Risk-score threshold used only by the naive 'threshold-based' baseline — OrderGuard's own expected-value engine doesn't use a fixed threshold at all."
+        >
+          <Field label="Threshold-based trigger score">
             <input
               type="number"
               className="input"
@@ -130,15 +311,17 @@ export default function SimulationLabPage() {
               onChange={(e) => setThreshold(Number(e.target.value))}
             />
           </Field>
-        </div>
+        </ConfigSection>
+
         <button
-          className="mt-4 px-4 py-2 rounded-md bg-[var(--accent)] text-black text-[12px] font-medium disabled:opacity-50"
+          className="mt-2 px-4 py-2 rounded-md bg-[var(--accent)] text-black text-[12px] font-medium disabled:opacity-50"
           onClick={runExperiment}
-          disabled={running}
+          disabled={status === "running"}
         >
-          {running ? "Running…" : "Run experiment"}
+          {status === "running" ? "Running simulation…" : "Run experiment"}
         </button>
-        {error ? <p className="mt-2 text-[12px] text-[var(--danger)]">{error}</p> : null}
+
+        <StatusBanner status={status} error={error} runId={result?.simulation_run_id} />
       </div>
 
       {result ? (
@@ -149,9 +332,48 @@ export default function SimulationLabPage() {
               className="text-[12px] text-[var(--accent)]"
               onClick={() => router.push(`/?run=${result.simulation_run_id}`)}
             >
-              View run {result.simulation_run_id} on Overview →
+              Inspect this run on Overview →
             </button>
           </div>
+
+          <div className="h-[220px] mb-4">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} barGap={4}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="metric" tick={{ fill: "var(--text-dim)", fontSize: 11 }} />
+                <YAxis
+                  tick={{ fill: "var(--text-dim)", fontSize: 11 }}
+                  label={{
+                    value: "% of orders",
+                    angle: -90,
+                    position: "insideLeft",
+                    fill: "var(--text-dim)",
+                    fontSize: 11,
+                  }}
+                />
+                <Tooltip
+                  contentStyle={{
+                    background: "var(--bg-panel-raised)",
+                    border: "1px solid var(--border)",
+                    fontSize: 12,
+                  }}
+                />
+                <Legend
+                  formatter={(value) => STRATEGY_LABEL[value] ?? value}
+                  wrapperStyle={{ fontSize: 11 }}
+                />
+                {result.metrics.map((m) => (
+                  <Bar
+                    key={m.strategy}
+                    dataKey={m.strategy}
+                    name={m.strategy}
+                    fill={STRATEGY_COLOR[m.strategy] ?? "#5b9dff"}
+                  />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
           <table>
             <thead>
               <tr>
@@ -187,13 +409,59 @@ export default function SimulationLabPage() {
             </tbody>
           </table>
           <p className="mt-3 text-[11px] text-[var(--text-faint)]">
-            Strategies re-seed independently from the same config, so they
-            start identically and diverge only once an intervention actually
-            changes an outcome — see docs/interview-notes.md for why totals
-            can differ slightly between rows.
+            These numbers are never adjusted to favor any strategy — the expected-value engine
+            can and sometimes does perform about the same as, or worse than, a baseline in a
+            given run. Strategies re-seed independently from the same config, so they start
+            identically and diverge only once an intervention actually changes an outcome (see
+            docs/interview-notes.md for why totals can differ slightly between rows).
           </p>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function StatusBanner({
+  status,
+  error,
+  runId,
+}: {
+  status: RunStatus;
+  error: string | null;
+  runId?: string;
+}) {
+  if (status === "idle") return null;
+  const styles: Record<RunStatus, string> = {
+    idle: "",
+    running: "text-[var(--text-dim)]",
+    success: "text-[var(--success)]",
+    error: "text-[var(--danger)]",
+  };
+  const text =
+    status === "running"
+      ? "Running simulation — three full strategy runs plus persistence, typically 1–5s depending on scale…"
+      : status === "success"
+        ? `Simulation complete — run ${runId}`
+        : `Simulation failed: ${error}`;
+  return <p className={`mt-2 text-[12px] ${styles[status]}`}>{text}</p>;
+}
+
+function ConfigSection({
+  title,
+  hint,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mb-4">
+      <div className="flex items-baseline gap-2 mb-2">
+        <h3 className="text-[11px] uppercase tracking-wide text-[var(--text-dim)]">{title}</h3>
+        {hint ? <span className="text-[10px] text-[var(--text-faint)]">{hint}</span> : null}
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">{children}</div>
     </div>
   );
 }

@@ -183,3 +183,41 @@ class TestMultipleRunsDoNotCollide:
         merchants_b = {m.id for m in repository.get_merchants_for_run(db_session, run_b.id)}
         assert merchants_a == merchants_b  # same generated local IDs
         assert len(merchants_a) > 0
+
+    def test_delivery_map_scoped_correctly_across_two_runs(self, db_session):
+        # Regression-shaped test: merchant/customer/driver ids repeat across
+        # runs (see the collision bug fixed in Milestone 8), so the map
+        # query's joins must resolve each order's merchant/customer/driver
+        # from *its own* run, never a same-id row belonging to the other run.
+        run_a, risk_a, intervention_a = _run_full_stack(seed=12)
+        run_b, risk_b, intervention_b = _run_full_stack(seed=13)
+        repository.save_simulation_run(
+            db_session,
+            run_a,
+            risk_history=risk_a.history,
+            intervention_history=intervention_a.history,
+        )
+        repository.save_simulation_run(
+            db_session,
+            run_b,
+            risk_history=risk_b.history,
+            intervention_history=intervention_b.history,
+        )
+
+        rows_a = repository.get_delivery_map_for_run(db_session, run_a.id)
+        rows_b = repository.get_delivery_map_for_run(db_session, run_b.id)
+        assert len(rows_a) == len(run_a.orders)
+        assert len(rows_b) == len(run_b.orders)
+
+        for row in rows_a:
+            order = run_a.orders[row.order_id]
+            merchant = run_a.merchants[order.merchant_id]
+            customer = run_a.customers[order.customer_id]
+            assert row.merchant_x_km == merchant.location.x_km
+            assert row.merchant_y_km == merchant.location.y_km
+            assert row.customer_x_km == customer.location.x_km
+            assert row.customer_y_km == customer.location.y_km
+            if row.driver_id is not None:
+                driver = run_a.drivers[row.driver_id]
+                assert row.driver_x_km == driver.location.x_km
+                assert row.driver_y_km == driver.location.y_km

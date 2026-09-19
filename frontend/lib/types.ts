@@ -19,6 +19,8 @@ export interface SimulationConfigIn {
   base_order_rate_per_minute: number;
   map_size_km: number;
   avg_driver_speed_kmh?: number;
+  avg_merchant_prep_minutes?: number;
+  merchant_prep_stddev_minutes?: number;
   driver_offline_probability_per_tick?: number;
   merchant_stockout_probability?: number;
   customer_unreachable_probability?: number;
@@ -154,8 +156,28 @@ export interface CustomerOut {
   reachability_score: number;
 }
 
+export interface MapDeliveryOut {
+  order_id: string;
+  status: string;
+  is_perishable: boolean;
+  is_active: boolean;
+  merchant_id: string;
+  merchant_x_km: number;
+  merchant_y_km: number;
+  customer_id: string;
+  customer_x_km: number;
+  customer_y_km: number;
+  driver_id: string | null;
+  driver_x_km: number | null;
+  driver_y_km: number | null;
+  driver_status: string | null;
+  latest_risk_score: number | null;
+  predicted_failure_type: string | null;
+}
+
 export interface MapEntitiesOut {
   merchants: MerchantOut[];
   drivers: DriverOut[];
   customers: CustomerOut[];
+  deliveries: MapDeliveryOut[];
 }

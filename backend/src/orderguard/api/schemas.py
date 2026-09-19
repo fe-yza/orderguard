@@ -10,7 +10,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from orderguard.domain.enums import TERMINAL_ORDER_STATUSES
 from orderguard.simulation.config import RushHourWindow, SimulationConfig
+
+TERMINAL_STATUS_VALUES = frozenset(s.value for s in TERMINAL_ORDER_STATUSES)
 
 
 class RushHourWindowIn(BaseModel):
@@ -168,10 +171,36 @@ class CustomerOut(BaseModel):
     reachability_score: float
 
 
+class MapDeliveryOut(BaseModel):
+    order_id: str
+    status: str
+    is_perishable: bool
+    is_active: bool
+    """True for orders not yet in a terminal state (delivered/failed/
+    cancelled) as of the moment the run ended."""
+    merchant_id: str
+    merchant_x_km: float
+    merchant_y_km: float
+    customer_id: str
+    customer_x_km: float
+    customer_y_km: float
+    driver_id: str | None
+    driver_x_km: float | None
+    driver_y_km: float | None
+    driver_status: str | None
+    latest_risk_score: float | None
+    """The order's most recently computed risk score. Present for every
+    order that reached CONFIRMED (i.e. almost all of them) — absent only if
+    somehow no risk assessment was ever computed. This is a *measured*
+    value read back from a stored assessment, not recomputed on the fly."""
+    predicted_failure_type: str | None
+
+
 class MapEntitiesOut(BaseModel):
     merchants: list[MerchantOut]
     drivers: list[DriverOut]
     customers: list[CustomerOut]
+    deliveries: list[MapDeliveryOut]
 
 
 class SimulationRunSummaryOut(BaseModel):

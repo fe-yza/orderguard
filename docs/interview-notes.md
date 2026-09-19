@@ -299,24 +299,42 @@ the simulation → persistence → HTTP response path.
 **What/why**: App Router, all data pages are Client Components (`"use
 client"`) that fetch directly from the FastAPI backend — no server-side
 proxy layer, since there's no auth or secret to hide yet and it keeps the
-stack simpler. Three pages: Overview (`/`, stat tiles + map + high-risk
-feed, polling every 20s), Simulation Lab (`/simulation-lab`, configure and
-run an experiment, see the three-strategy comparison table), Order
-Inspector (`/orders/[id]`, timeline + risk factor breakdown + intervention
-cost-comparison table).
+stack simpler. Three pages: Overview (`/`, an explanation banner + stat
+tiles + map + high-risk feed, polling every 20s), Simulation Lab
+(`/simulation-lab`, configure and run an experiment, see the three-strategy
+comparison as both a table and a bar chart), Order Inspector
+(`/simulations/[runId]/orders/[orderId]`, timeline + risk-over-time chart +
+factor breakdown + intervention cost-comparison table).
 
 **No mock data, anywhere**: every value rendered comes from a `fetch` to a
 real endpoint on the FastAPI backend, backed by real Postgres rows. There is
 no fixture/demo-data fallback path — if the backend is down, the page shows
 an API error, not a plausible-looking fake number.
 
-**Map**: MapLibre GL with a blank style (no tile source, no external
-network requests) — merchants/drivers/customers are plotted using their
-synthetic x/y km coordinates directly as the "projection." This is an
-honest simplification documented in the component: there is no real
-geography in this simulation to render, and pretending otherwise (e.g. by
-inventing a city and lat/lon) would be exactly the kind of fabrication this
-project's principles rule out.
+**Map** (`components/MarketplaceMap.tsx`): plain SVG, not MapLibre GL —
+switched after the first pass, deliberately, once it became clear there was
+no real geography to project onto and a general-purpose mapping library was
+pure overhead for a synthetic coordinate plane. Bounds are computed from
+the actual returned merchant/driver/customer positions (no hardcoded
+map-size assumption); delivery routes are drawn only for orders that
+actually got a driver assigned (`driver_id is not null`), colored by
+status — active + above the current risk threshold gets a distinct color
+and a highlighted driver marker, terminal orders render dim and desaturated
+by outcome. Backed by a new endpoint, `GET /simulations/{run_id}/map`'s
+`deliveries` array (`persistence/repository.py`'s `get_delivery_map_for_run`
+— one query, joining orders to merchants/customers/drivers/latest-risk,
+every join condition scoped by `simulation_run_id` for the same reason
+composite keys exist at all: none of those IDs are unique across runs).
+
+**Empty states, handled honestly**: the high-risk feed fetches every scored
+order once (`min_score=0`) and applies the threshold client-side, so
+raising/lowering it never needs a round trip. When *nothing* clears the
+threshold — which happens on plenty of real runs, not a hypothetical: a
+seed-77 run with deliberately elevated hazard rates still topped out at a
+9.1 risk score — the panel says so explicitly and shows the top-10 highest-
+risk orders anyway, labeled as below-threshold. This was a deliberate
+answer to "the dashboard can show 0 high-risk orders" rather than either
+lying about it or leaving a blank panel.
 
 **Live stats without WebSockets**: polling (`setInterval`, 20s) rather than
 push, consistent with WebSockets being explicitly deferred in the roadmap.
@@ -326,25 +344,36 @@ intermediate states. Acceptable for a portfolio-scale demo; the roadmap
 already names WebSocket live updates as the next highest-value addition
 after the MVP ships.
 
-**Not yet verified**: no browser/screenshot tool was available in the
-session that built this — verification was `tsc --noEmit` (clean), `eslint`
-(clean), `next build` (clean), and confirming all three routes return HTTP
-200 against a live backend with real data (via `curl`, checking the
-server-rendered HTML shell). Client-side hydration and interactive behavior
-(polling, the map actually drawing points, form submission) were not
-visually confirmed in an actual browser and should be spot-checked before
-calling this milestone done.
+**Not yet verified**: no browser/screenshot tool has been available in any
+session that's worked on this — verification has been `tsc --noEmit`
+(clean), `eslint` (clean), `next build` (clean), confirming every route
+returns HTTP 200 against a live backend with real data (via `curl`,
+checking the server-rendered HTML shell, including grepping for specific
+content that only renders once client-side data fetches resolve), and
+independently querying the same API endpoints the frontend calls to confirm
+the data shape and values it will receive are sane (e.g. confirmed a real
+run with 22 active high-risk deliveries, one at a 72.5 score with a
+genuine `notify_customer` intervention and a $0.33 expected net value, and
+separately confirmed a run where nothing clears the default 50-point
+threshold, to exercise the fallback path). What's still unverified is
+purely visual/interactive: does the SVG map actually look right, are chart
+labels legible, does the layout hold at narrow widths. Spot-check in an
+actual browser before treating this as fully done.
 
 **Likely interview questions**: "Why Client Components instead of Server
 Components fetching in `page.tsx`?" (the data needs to poll/refresh and
 respond to user-driven config changes — Server Components render once per
 request, which doesn't fit a "live" dashboard without either polling from
 the client anyway or a more complex revalidation setup; simplest correct
-choice given the requirement). "Why no charting library on the Simulation
-Lab comparison?" (a plain table was enough to show the three strategies'
-numbers clearly at this scale — Recharts is installed and ready if the
-comparison grows to need a visual, e.g. a grouped bar chart across many
-experiment runs).
+choice given the requirement). "Why SVG for the map instead of a mapping
+library?" (see the Map section above — no real geography, so a
+general-purpose mapping library bought nothing but bundle size and
+complexity; a first pass actually used MapLibre GL before being replaced).
+"Why recharts and not something lighter for two small charts?" (already
+needed a real charting library for the Simulation Lab comparison and the
+per-order risk-history view — one dependency serving two call sites beat
+hand-rolling SVG charts a second time in the same codebase that already
+hand-rolls the map).
 
 ## Benchmarks
 

@@ -6,9 +6,9 @@ Nothing above the persistence layer should import SQLAlchemy directly (see
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session, aliased, selectinload
 
 from orderguard.experiments.models import SimulationMetrics
@@ -296,6 +296,139 @@ def get_latest_risk_assessments_for_run(
         .order_by(latest_subq.c.overall_risk_score.desc())
     )
     return list(session.execute(stmt).all())
+
+
+@dataclass(slots=True)
+class DeliveryMapRow:
+    """One order's map-relevant state: its fixed merchant/customer
+    endpoints, its driver's *current* position if a delivery exists (this
+    is exact for orders still in flight when the run ended — the driver
+    genuinely hasn't moved since — and simply the driver's last position
+    before moving on to something else for terminal orders), and its latest
+    risk assessment if one was ever computed. Feeds the Overview map."""
+
+    order_id: str
+    status: str
+    is_perishable: bool
+    merchant_id: str
+    merchant_x_km: float
+    merchant_y_km: float
+    customer_id: str
+    customer_x_km: float
+    customer_y_km: float
+    driver_id: str | None
+    driver_x_km: float | None
+    driver_y_km: float | None
+    driver_status: str | None
+    latest_risk_score: float | None
+    predicted_failure_type: str | None
+
+
+def get_delivery_map_for_run(session: Session, run_id: str) -> list[DeliveryMapRow]:
+    """Every order in the run with enough state to draw it on a map: its
+    merchant/customer endpoints, its driver (if assigned), and its latest
+    risk score (if any was ever computed). One query, not N+1 — every join
+    condition includes `simulation_run_id` explicitly, because merchant/
+    driver/customer/order IDs are only unique *within* a run (composite
+    keys — see this module's docstring); a join on the bare id column alone
+    would silently match the wrong run's row once more than one run
+    exists.
+    """
+    row_number = (
+        func.row_number()
+        .over(
+            partition_by=RiskAssessmentRecord.order_id,
+            order_by=RiskAssessmentRecord.computed_at.desc(),
+        )
+        .label("rn")
+    )
+    latest_risk_subq = (
+        select(
+            RiskAssessmentRecord.order_id,
+            RiskAssessmentRecord.overall_risk_score,
+            RiskAssessmentRecord.predicted_failure_type,
+            row_number,
+        )
+        .where(RiskAssessmentRecord.simulation_run_id == run_id)
+        .subquery()
+    )
+
+    stmt = (
+        select(
+            OrderRecord.id,
+            OrderRecord.status,
+            OrderRecord.is_perishable,
+            MerchantRecord.id,
+            MerchantRecord.location_x_km,
+            MerchantRecord.location_y_km,
+            CustomerRecord.id,
+            CustomerRecord.location_x_km,
+            CustomerRecord.location_y_km,
+            DriverRecord.id,
+            DriverRecord.location_x_km,
+            DriverRecord.location_y_km,
+            DriverRecord.final_status,
+            latest_risk_subq.c.overall_risk_score,
+            latest_risk_subq.c.predicted_failure_type,
+        )
+        .join(
+            MerchantRecord,
+            and_(
+                MerchantRecord.simulation_run_id == OrderRecord.simulation_run_id,
+                MerchantRecord.id == OrderRecord.merchant_id,
+            ),
+        )
+        .join(
+            CustomerRecord,
+            and_(
+                CustomerRecord.simulation_run_id == OrderRecord.simulation_run_id,
+                CustomerRecord.id == OrderRecord.customer_id,
+            ),
+        )
+        .outerjoin(
+            DeliveryRecord,
+            and_(
+                DeliveryRecord.simulation_run_id == OrderRecord.simulation_run_id,
+                DeliveryRecord.order_id == OrderRecord.id,
+            ),
+        )
+        .outerjoin(
+            DriverRecord,
+            and_(
+                DriverRecord.simulation_run_id == OrderRecord.simulation_run_id,
+                DriverRecord.id == DeliveryRecord.driver_id,
+            ),
+        )
+        .outerjoin(
+            latest_risk_subq,
+            and_(
+                latest_risk_subq.c.order_id == OrderRecord.id,
+                latest_risk_subq.c.rn == 1,
+            ),
+        )
+        .where(OrderRecord.simulation_run_id == run_id)
+    )
+
+    return [
+        DeliveryMapRow(
+            order_id=row[0],
+            status=row[1],
+            is_perishable=row[2],
+            merchant_id=row[3],
+            merchant_x_km=row[4],
+            merchant_y_km=row[5],
+            customer_id=row[6],
+            customer_x_km=row[7],
+            customer_y_km=row[8],
+            driver_id=row[9],
+            driver_x_km=row[10],
+            driver_y_km=row[11],
+            driver_status=row[12],
+            latest_risk_score=row[13],
+            predicted_failure_type=row[14],
+        )
+        for row in session.execute(stmt).all()
+    ]
 
 
 def get_merchants_for_run(session: Session, run_id: str) -> list[MerchantRecord]:

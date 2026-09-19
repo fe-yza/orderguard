@@ -150,6 +150,42 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done and tested
 - [x] `docs/interview-notes.md` complete and current for every milestone
       through this one
 
+## Post-MVP — recruiter-facing demo refinement
+With the MVP complete (Milestones 1-9), the Overview and Simulation Lab
+pages were audited against actual backend capability and reworked so the
+existing engineering (simulation, risk, intervention, experiment
+framework) is *visible*, not hidden behind aggregate stat tiles:
+- [x] `GET /simulations/{run_id}/map` now returns per-order delivery data
+      (merchant/customer/driver positions + latest risk score), not just
+      the three static entity lists — added `get_delivery_map_for_run`
+      (one query, correctly scoped by `simulation_run_id` on every join).
+- [x] Marketplace map rewritten as a plain SVG coordinate-plane
+      visualization (`components/MarketplaceMap.tsx`), replacing MapLibre
+      GL entirely (removed the dependency) — merchants, drivers, and
+      delivery routes colored by status/risk, no external map/tiles since
+      there's no real geography to show.
+- [x] High-risk feed now has a working empty-state fallback: fetches every
+      scored order once, filters to a threshold client-side (with quick
+      preset buttons), and — when a run genuinely has nothing above the
+      threshold — truthfully says so and shows the top-N riskiest orders
+      anyway instead of an empty panel.
+- [x] Simulation Lab expanded to expose merchant prep behavior, rush-hour
+      windows, and the four failure-hazard-rate knobs (all pre-existing
+      `SimulationConfig` fields that weren't in the UI yet), plus explicit
+      running/success/error state and a grouped bar chart (via the
+      already-installed but previously-unused `recharts`) comparing the
+      three strategies' late/failure/cancellation rates.
+- [x] Order Inspector: added a risk-score-over-time chart (from the order's
+      full assessment history, not just the latest), the chosen
+      intervention's estimated probability/cost reduction and expected net
+      value vs. doing nothing, and explicit "measured" / "model estimate"
+      badges on every section.
+- [x] Explanation banner on Overview stating plainly what OrderGuard is and
+      that no real company data (DoorDash or otherwise) is used.
+- 113 backend tests passing (2 new: delivery-map cross-run isolation,
+  map-endpoint delivery data shape); frontend `tsc`/`eslint`/`next build`
+  all clean.
+
 ## Explicitly out of scope (until MVP is solid and deployed)
 Kafka/Redis Streams, service decomposition, ML risk model, WebSocket real-time
 push, marketplace-wide bipartite-graph optimization, Prometheus/Grafana,

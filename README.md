@@ -281,7 +281,7 @@ configured yet.
 
 ```
 backend/     Python 3.12 / FastAPI / SQLAlchemy / Alembic
-frontend/    Next.js / React / TypeScript / MapLibre GL
+frontend/    Next.js / React / TypeScript (marketplace map is plain SVG, not a map library)
 docs/
   architecture.md       module boundaries, domain model, design rationale
   interview-notes.md    component-by-component deep dive, maintained continuously
