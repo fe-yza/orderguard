@@ -134,11 +134,21 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done and tested
   to match). See `docs/interview-notes.md` for the full story.
 
 ## Milestone 9 — Docker + CI + README
-- [ ] `docker compose up` works end to end
-- [ ] GitHub Actions: lint, test, build
-- [ ] README as engineering case study (problem, architecture, methodology,
+- [x] `docker compose up` works end to end — verified for real: built both
+      images, brought up postgres/backend/frontend, confirmed migrations
+      ran automatically, hit `/health` and ran a full `POST /simulations`
+      experiment against the dockerized stack, then tore it down. (Neither
+      Docker nor a container runtime was present on this dev machine;
+      installed Colima + the Docker CLI via Homebrew to actually run this
+      rather than just writing the compose file and assuming it works.)
+- [x] GitHub Actions: lint, test, build (`.github/workflows/ci.yml`) — every
+      individual command in it has been run and verified locally in this
+      session; the workflow itself hasn't executed on GitHub's
+      infrastructure, since this repo has no GitHub remote configured.
+- [x] README as engineering case study (problem, architecture, methodology,
       measured results, benchmarks, engineering-decisions, honest limitations)
-- [ ] `docs/interview-notes.md` complete and current
+- [x] `docs/interview-notes.md` complete and current for every milestone
+      through this one
 
 ## Explicitly out of scope (until MVP is solid and deployed)
 Kafka/Redis Streams, service decomposition, ML risk model, WebSocket real-time

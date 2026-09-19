@@ -453,3 +453,39 @@ it). "What would you profile next if this needed to scale further?"
 `repository.py` — SQLAlchemy's ORM-level bulk insert is not the fastest way
 to write tens of thousands of rows; `bulk_insert_mappings` or raw
 `COPY`-based loading would be the next thing to measure, not assume).
+
+## Docker & CI
+
+**What/why**: `docker-compose.yml` at the repo root wires up Postgres, the
+backend (migrations run automatically via the container's `CMD` before
+`uvicorn` starts — `sh -c "alembic upgrade head && uvicorn ..."`), and the
+frontend (`next build` with `output: "standalone"`, so the runtime image
+only ships the resolved dependency subset, not the full workspace).
+
+**Actually verified, not just written**: neither Docker nor any container
+runtime was present on the machine this was built on. Installed Colima
+(a lightweight Linux VM) + the Docker CLI via Homebrew, then genuinely ran
+`docker compose build` and `docker compose up`, confirmed migrations
+executed in the backend container's logs, hit `/health`, ran a full
+`POST /simulations` experiment against the dockerized API, and tore the
+stack down — the same bar as everything else in this project: don't claim
+something works without running it.
+
+**CI**: `.github/workflows/ci.yml` runs backend lint (`ruff`) + migrations +
+`pytest` against a real `postgres:16` service container, and frontend
+`eslint` + `tsc --noEmit` + `next build`. Every individual command in the
+workflow has been run successfully in this repo's own local development;
+the workflow file itself has not executed on GitHub Actions, since this
+repository has no GitHub remote configured. That's a meaningful caveat, not
+a technicality — a YAML file that's never actually run on the target
+platform can still have a wrong working-directory path or a missing env var
+that only shows up there. Push to a real GitHub remote and watch the first
+run before treating this as "CI passes," not just "CI is configured."
+
+**Likely interview questions**: "Why Colima instead of Docker Desktop?"
+(Docker Desktop needs a GUI installer and manual first-run steps that don't
+work in a non-interactive environment; Colima is scriptable end-to-end via
+Homebrew + CLI, which is what let this actually get verified instead of
+just written). "What would you add to CI next?" (a step that actually spins
+up `docker compose` and smoke-tests it, so a broken Dockerfile fails CI
+before it fails a real deploy — not present yet).
