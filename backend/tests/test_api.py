@@ -97,6 +97,23 @@ class TestSimulationEndpoints:
         scores = [r["latest_risk_assessment"]["overall_risk_score"] for r in results]
         assert scores == sorted(scores, reverse=True)
 
+    def test_map_endpoint(self, db_session):
+        body = _create_experiment(seed=108)
+        run_id = body["simulation_run_id"]
+        response = client.get(f"/simulations/{run_id}/map")
+        assert response.status_code == 200
+        entities = response.json()
+        assert len(entities["merchants"]) == BASE_CONFIG["num_merchants"]
+        assert len(entities["drivers"]) == BASE_CONFIG["num_drivers"]
+        assert len(entities["customers"]) == BASE_CONFIG["num_customers"]
+        for merchant in entities["merchants"]:
+            assert 0 <= merchant["location_x_km"] <= BASE_CONFIG["map_size_km"]
+            assert 0 <= merchant["location_y_km"] <= BASE_CONFIG["map_size_km"]
+
+    def test_map_endpoint_unknown_run_404s(self, db_session):
+        response = client.get("/simulations/does-not-exist/map")
+        assert response.status_code == 404
+
 
 class TestOrderEndpoint:
     def test_order_detail_has_timeline_and_risk(self, db_session):

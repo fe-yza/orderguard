@@ -87,14 +87,26 @@ Legend: `[ ]` not started · `[~]` in progress · `[x]` done and tested
   PostgreSQL 16 locally (none were present) — see `docs/interview-notes.md`.
 
 ## Milestone 7 — Operations Dashboard
-- [ ] Live stats: active deliveries, high-risk count, failure rate,
-      interventions triggered
-- [ ] Map (MapLibre GL)
-- [ ] High-risk order feed
-- [ ] Order inspector: timeline, risk factors, recommended intervention, cost
-      math
-- [ ] Simulation Lab: configure + run experiments, view comparative results
-- [ ] Every number on screen traces to a backend calculation
+- [x] Live stats: active deliveries, high-risk count, failure rate,
+      interventions triggered (polled every 20s — no WebSocket push yet,
+      per the out-of-scope list)
+- [x] Map (MapLibre GL) — merchants/drivers/customers plotted on a blank
+      style using their synthetic x/y km coordinates directly as the
+      projection (there is no real geography to show; see
+      `components/MapView.tsx`)
+- [x] High-risk order feed
+- [x] Order inspector: timeline, risk factors, recommended intervention, cost
+      math (`/orders/[id]`)
+- [x] Simulation Lab: configure + run experiments, view comparative results
+      (`/simulation-lab`)
+- [x] Every number on screen traces to a backend calculation — the frontend
+      has no mock data or fallback fixtures; every page fetches from the
+      real FastAPI backend
+- Verified: `tsc --noEmit`, `eslint`, and `next build` all clean; all three
+  routes return HTTP 200 against a live backend with real seeded data.
+  Not yet verified in an actual browser (no browser/screenshot tool
+  available this session) — dev servers were left running on :3000/:8000
+  for manual visual check.
 
 ## Milestone 8 — Tests + Benchmarks
 - [ ] Unit/integration/API coverage: risk calc, intervention selection,

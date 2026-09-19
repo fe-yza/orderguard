@@ -259,7 +259,56 @@ mocks — every assertion is checking data that actually round-tripped through
 the simulation → persistence → HTTP response path.
 
 ## Dashboard (Next.js)
-_Not yet built._
+
+**What/why**: App Router, all data pages are Client Components (`"use
+client"`) that fetch directly from the FastAPI backend — no server-side
+proxy layer, since there's no auth or secret to hide yet and it keeps the
+stack simpler. Three pages: Overview (`/`, stat tiles + map + high-risk
+feed, polling every 20s), Simulation Lab (`/simulation-lab`, configure and
+run an experiment, see the three-strategy comparison table), Order
+Inspector (`/orders/[id]`, timeline + risk factor breakdown + intervention
+cost-comparison table).
+
+**No mock data, anywhere**: every value rendered comes from a `fetch` to a
+real endpoint on the FastAPI backend, backed by real Postgres rows. There is
+no fixture/demo-data fallback path — if the backend is down, the page shows
+an API error, not a plausible-looking fake number.
+
+**Map**: MapLibre GL with a blank style (no tile source, no external
+network requests) — merchants/drivers/customers are plotted using their
+synthetic x/y km coordinates directly as the "projection." This is an
+honest simplification documented in the component: there is no real
+geography in this simulation to render, and pretending otherwise (e.g. by
+inventing a city and lat/lon) would be exactly the kind of fabrication this
+project's principles rule out.
+
+**Live stats without WebSockets**: polling (`setInterval`, 20s) rather than
+push, consistent with WebSockets being explicitly deferred in the roadmap.
+This is a real, known limitation — if the user is watching for a change
+that happens more often than the poll interval, they'll miss the
+intermediate states. Acceptable for a portfolio-scale demo; the roadmap
+already names WebSocket live updates as the next highest-value addition
+after the MVP ships.
+
+**Not yet verified**: no browser/screenshot tool was available in the
+session that built this — verification was `tsc --noEmit` (clean), `eslint`
+(clean), `next build` (clean), and confirming all three routes return HTTP
+200 against a live backend with real data (via `curl`, checking the
+server-rendered HTML shell). Client-side hydration and interactive behavior
+(polling, the map actually drawing points, form submission) were not
+visually confirmed in an actual browser and should be spot-checked before
+calling this milestone done.
+
+**Likely interview questions**: "Why Client Components instead of Server
+Components fetching in `page.tsx`?" (the data needs to poll/refresh and
+respond to user-driven config changes — Server Components render once per
+request, which doesn't fit a "live" dashboard without either polling from
+the client anyway or a more complex revalidation setup; simplest correct
+choice given the requirement). "Why no charting library on the Simulation
+Lab comparison?" (a plain table was enough to show the three strategies'
+numbers clearly at this scale — Recharts is installed and ready if the
+comparison grows to need a visual, e.g. a grouped bar chart across many
+experiment runs).
 
 ## Benchmarks
 _Not yet built._
