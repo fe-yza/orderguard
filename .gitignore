@@ -23,12 +23,15 @@ frontend/.env*.local
 .env
 .env.*
 !.env.example
+*.pem
+*.key
 
 # OS / editor
 .DS_Store
 .vscode/
 .idea/
 .claude/
+*.swp
 
 # Docker
 *.log
