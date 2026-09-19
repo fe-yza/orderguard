@@ -518,3 +518,58 @@ Homebrew + CLI, which is what let this actually get verified instead of
 just written). "What would you add to CI next?" (a step that actually spins
 up `docker compose` and smoke-tests it, so a broken Dockerfile fails CI
 before it fails a real deploy — not present yet).
+
+## Guided tour / onboarding
+
+**What/why**: a spotlight-and-card product tour (`lib/tour/`,
+`components/tour/`) that walks a first-time visitor through the entire
+pipeline — marketplace → risk score → intervention decision → experiment
+comparison — using the visitor's own real data, never a scripted fake
+scenario. Pure frontend feature: zero backend changes were needed, since
+every step reads from endpoints that already existed.
+
+**Architecture**: `TourProvider` (React context, mounted once in the root
+layout so it survives client-side navigation between pages) holds
+`stepIndex`/`active`/`awaitedOrder` state, mirrored to `sessionStorage` so a
+hard refresh mid-tour resumes rather than silently vanishing. `useTourTarget`
+tracks a step's `[data-tour="..."]` element live via `MutationObserver` +
+`ResizeObserver` (not polling), so the spotlight follows the real DOM as
+pages load and data arrives. Steps advance three ways: a Next button
+(most steps), detecting the visitor actually opened the order the tour is
+pointing at (compared against an `awaitedOrder` the Overview page resolves),
+or detecting a real `POST /simulations` succeeded — never a timer standing
+in for a real event.
+
+**The interesting problem**: a first-time visitor's database can be
+completely empty, and the tour needs a genuinely high-risk order to point
+at. Rather than fabricating one, Overview resolves this by checking the
+current run's real risk data first, and only falls back to running one
+specific, previously-verified `SimulationConfig` (fixed seed) through the
+existing `POST /simulations` endpoint — a real simulation, just one chosen
+because it reliably produces interesting risk. Deterministic seeding means
+re-running it always produces the same scenario, and the resolver checks
+for an already-existing run with that seed before creating a new one, so
+retaking the tour doesn't pile up duplicate demo runs.
+
+**A real accuracy bug this surfaced**: the Simulation Lab's "Failure hazard
+rates" hint claimed all four knobs were "per-tick probabilities." Checking
+`simulation/engine.py` against that claim: `driver_offline_probability_per_tick`
+and `perishable_spoilage_probability_per_tick` genuinely are — rolled every
+simulated minute. `merchant_stockout_probability` and
+`customer_unreachable_probability` are each rolled exactly *once* (at order
+confirmation and at customer arrival, respectively). The hint and the
+field labels were both wrong and have been corrected. Also renamed
+"P(failure)" in the intervention table to "Implied P(failure)" with a
+tooltip — the code already documented this as a modeling simplification
+(risk score ÷ 100), but the UI label alone read like a real probability.
+Also relabeled "Avg/P95 delay" to make the sign explicit (negative = early,
+positive = late) after confirming `avg_delay_minutes` is
+`delivered_at − promised_delivery_time` averaged over delivered orders only
+— a −20 average is not a nonsensical value, it's 20 minutes early.
+
+**Known limitation**: a small number of `react-hooks/set-state-in-effect`
+lint findings are suppressed with narrow, commented exceptions — all three
+are the standard "sync React state to an external system on mount"
+pattern (reading storage once; tracking live DOM position; a settle-timer)
+that React's own docs list as a legitimate use of effects, not something
+restructurable without reintroducing an SSR/hydration mismatch.

@@ -13,6 +13,8 @@ import {
 } from "recharts";
 import { api, ApiError } from "@/lib/api";
 import type { InterventionDecisionOut, OrderDetailOut } from "@/lib/types";
+import { InfoTooltip } from "@/components/tour/InfoTooltip";
+import { useTour } from "@/lib/tour/TourContext";
 
 export function OrderInspector({
   runId,
@@ -23,6 +25,7 @@ export function OrderInspector({
 }) {
   const [order, setOrder] = useState<OrderDetailOut | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const tour = useTour();
 
   useEffect(() => {
     api
@@ -33,6 +36,12 @@ export function OrderInspector({
       );
   }, [runId, orderId]);
 
+  useEffect(() => {
+    if (!order) return;
+    tour.notifyOrderOpened(runId, orderId, order.risk_assessments.length > 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order, runId, orderId]);
+
   if (error) return <p className="text-[var(--danger)] text-[12px]">{error}</p>;
   if (!order) return <p className="text-[var(--text-dim)] text-[12px]">Loading…</p>;
 
@@ -41,7 +50,7 @@ export function OrderInspector({
 
   return (
     <div className="flex flex-col gap-5 max-w-4xl">
-      <div>
+      <div data-tour="order-header">
         <Link href={`/?run=${runId}`} className="text-[12px] text-[var(--accent)]">
           ← Overview
         </Link>
@@ -54,7 +63,7 @@ export function OrderInspector({
         </p>
       </div>
 
-      <Section title="Timeline" badge="measured">
+      <Section title="Timeline" badge="measured" dataTour="order-timeline">
         <table>
           <thead>
             <tr>
@@ -80,7 +89,7 @@ export function OrderInspector({
       </Section>
 
       {order.risk_assessments.length > 1 ? (
-        <Section title="Risk score over time" badge="model estimate">
+        <Section title="Risk score over time" badge="model estimate" dataTour="risk-history-chart">
           <div className="h-[160px]">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart
@@ -120,7 +129,7 @@ export function OrderInspector({
         </Section>
       ) : null}
 
-      <Section title="Latest risk assessment" badge="model estimate">
+      <Section title="Latest risk assessment" badge="model estimate" dataTour="risk-assessment">
         {latestRisk ? (
           <div className="flex flex-col gap-3">
             <div className="flex gap-6">
@@ -158,7 +167,11 @@ export function OrderInspector({
         )}
       </Section>
 
-      <Section title="Recommended intervention — expected-value reasoning" badge="model estimate">
+      <Section
+        title="Recommended intervention — expected-value reasoning"
+        badge="model estimate"
+        dataTour="intervention-section"
+      >
         {latestDecision ? (
           <InterventionMath decision={latestDecision} />
         ) : (
@@ -174,14 +187,16 @@ export function OrderInspector({
 function Section({
   title,
   badge,
+  dataTour,
   children,
 }: {
   title: string;
   badge?: "measured" | "model estimate";
+  dataTour?: string;
   children: React.ReactNode;
 }) {
   return (
-    <div className="panel p-4 overflow-x-auto">
+    <div className="panel p-4 overflow-x-auto" data-tour={dataTour}>
       <div className="flex items-center gap-2 mb-3">
         <h2 className="text-[12px] uppercase tracking-wide text-[var(--text-dim)]">{title}</h2>
         {badge ? (
@@ -214,8 +229,13 @@ function InterventionMath({ decision }: { decision: InterventionDecisionOut }) {
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-[12px]">
+      <p className="text-[12px] flex items-center gap-1.5">
         Chosen: <span className="mono text-[var(--accent)]">{decision.chosen}</span>
+        <InfoTooltip title="What is expected value?">
+          (Cost of doing nothing) − (direct cost + residual expected failure cost of acting).
+          OrderGuard picks whichever option — including doing nothing — has the lowest total
+          expected cost.
+        </InfoTooltip>
       </p>
       <p className="text-[11px] text-[var(--text-dim)]">{decision.rationale}</p>
 
@@ -246,7 +266,13 @@ function InterventionMath({ decision }: { decision: InterventionDecisionOut }) {
           <tr>
             <th>Intervention</th>
             <th>Direct cost</th>
-            <th>P(failure)</th>
+            <th>
+              Implied P(failure)
+              <InfoTooltip title="Implied P(failure)">
+                The risk score ÷ 100, treated as an implied probability. This is a deliberate
+                modeling simplification, not a calibrated probability of failure.
+              </InfoTooltip>
+            </th>
             <th>Est. prob. reduction</th>
             <th>Est. cost reduction</th>
             <th>Failure cost</th>

@@ -72,10 +72,6 @@ tr:hover td {
   background: var(--bg-panel-raised);
 }
 
-.maplibregl-map {
-  border-radius: 6px;
-}
-
 .input {
   background: var(--bg-panel-raised);
   border: 1px solid var(--border);

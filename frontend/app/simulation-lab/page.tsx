@@ -14,6 +14,8 @@ import {
 } from "recharts";
 import { api, ApiError } from "@/lib/api";
 import type { ExperimentResponseOut, RushHourWindowIn, SimulationConfigIn } from "@/lib/types";
+import { InfoTooltip } from "@/components/tour/InfoTooltip";
+import { useTour } from "@/lib/tour/TourContext";
 
 const DEFAULT_CONFIG: SimulationConfigIn = {
   seed: 42,
@@ -55,6 +57,7 @@ type RunStatus = "idle" | "running" | "success" | "error";
 
 export default function SimulationLabPage() {
   const router = useRouter();
+  const tour = useTour();
   const [config, setConfig] = useState<SimulationConfigIn>(DEFAULT_CONFIG);
   const [threshold, setThreshold] = useState(50);
   const [rushHourEnabled, setRushHourEnabled] = useState(false);
@@ -77,6 +80,7 @@ export default function SimulationLabPage() {
   async function runExperiment() {
     setStatus("running");
     setError(null);
+    tour.notifyExperimentStatus("running");
     try {
       const fullConfig: SimulationConfigIn = {
         ...config,
@@ -85,9 +89,11 @@ export default function SimulationLabPage() {
       const response = await api.createExperiment(fullConfig, threshold);
       setResult(response);
       setStatus("success");
+      tour.notifyExperimentStatus("success", response.simulation_run_id);
     } catch (e) {
       setError(e instanceof ApiError ? `API error ${e.status}: ${e.message}` : String(e));
       setStatus("error");
+      tour.notifyExperimentStatus("error");
     }
   }
 
@@ -117,203 +123,223 @@ export default function SimulationLabPage() {
           engine accepts.
         </p>
 
-        <ConfigSection title="Marketplace scale">
-          <Field label="Random seed">
-            <input
-              type="number"
-              className="input"
-              value={config.seed}
-              onChange={(e) => updateField("seed", Number(e.target.value))}
-            />
-          </Field>
-          <Field label="Duration (sim. minutes)">
-            <input
-              type="number"
-              className="input"
-              value={config.duration_minutes}
-              onChange={(e) => updateField("duration_minutes", Number(e.target.value))}
-            />
-          </Field>
-          <Field label="Merchants">
-            <input
-              type="number"
-              className="input"
-              value={config.num_merchants}
-              onChange={(e) => updateField("num_merchants", Number(e.target.value))}
-            />
-          </Field>
-          <Field label="Drivers (supply)">
-            <input
-              type="number"
-              className="input"
-              value={config.num_drivers}
-              onChange={(e) => updateField("num_drivers", Number(e.target.value))}
-            />
-          </Field>
-          <Field label="Customers">
-            <input
-              type="number"
-              className="input"
-              value={config.num_customers}
-              onChange={(e) => updateField("num_customers", Number(e.target.value))}
-            />
-          </Field>
-          <Field label="Map size (km)">
-            <input
-              type="number"
-              className="input"
-              value={config.map_size_km}
-              onChange={(e) => updateField("map_size_km", Number(e.target.value))}
-            />
-          </Field>
-        </ConfigSection>
+        <div data-tour="sim-config-scale">
+          <ConfigSection title="Marketplace scale">
+            <Field label="Random seed">
+              <input
+                type="number"
+                className="input"
+                value={config.seed}
+                onChange={(e) => updateField("seed", Number(e.target.value))}
+              />
+            </Field>
+            <Field label="Duration (sim. minutes)">
+              <input
+                type="number"
+                className="input"
+                value={config.duration_minutes}
+                onChange={(e) => updateField("duration_minutes", Number(e.target.value))}
+              />
+            </Field>
+            <Field label="Merchants">
+              <input
+                type="number"
+                className="input"
+                value={config.num_merchants}
+                onChange={(e) => updateField("num_merchants", Number(e.target.value))}
+              />
+            </Field>
+            <Field label="Drivers (supply)">
+              <input
+                type="number"
+                className="input"
+                value={config.num_drivers}
+                onChange={(e) => updateField("num_drivers", Number(e.target.value))}
+              />
+            </Field>
+            <Field label="Customers">
+              <input
+                type="number"
+                className="input"
+                value={config.num_customers}
+                onChange={(e) => updateField("num_customers", Number(e.target.value))}
+              />
+            </Field>
+            <Field label="Map size (km)">
+              <input
+                type="number"
+                className="input"
+                value={config.map_size_km}
+                onChange={(e) => updateField("map_size_km", Number(e.target.value))}
+              />
+            </Field>
+          </ConfigSection>
 
-        <ConfigSection title="Demand">
-          <Field label="Order arrival rate (/min)">
-            <input
-              type="number"
-              step="0.1"
-              className="input"
-              value={config.base_order_rate_per_minute}
-              onChange={(e) => updateField("base_order_rate_per_minute", Number(e.target.value))}
-            />
-          </Field>
-          <label className="flex items-center gap-2 text-[11px] text-[var(--text-dim)] self-end pb-1.5">
-            <input
-              type="checkbox"
-              checked={rushHourEnabled}
-              onChange={(e) => setRushHourEnabled(e.target.checked)}
-            />
-            Enable rush-hour window
-          </label>
-          {rushHourEnabled ? (
-            <>
-              <Field label="Rush start (min)">
-                <input
-                  type="number"
-                  className="input"
-                  value={rushHour.start_minute}
-                  onChange={(e) => updateRushHour("start_minute", Number(e.target.value))}
-                />
-              </Field>
-              <Field label="Rush end (min)">
-                <input
-                  type="number"
-                  className="input"
-                  value={rushHour.end_minute}
-                  onChange={(e) => updateRushHour("end_minute", Number(e.target.value))}
-                />
-              </Field>
-              <Field label="Demand multiplier">
-                <input
-                  type="number"
-                  step="0.1"
-                  className="input"
-                  value={rushHour.demand_multiplier}
-                  onChange={(e) => updateRushHour("demand_multiplier", Number(e.target.value))}
-                />
-              </Field>
-              <Field label="Travel speed multiplier">
-                <input
-                  type="number"
-                  step="0.05"
-                  min="0.05"
-                  max="1"
-                  className="input"
-                  value={rushHour.speed_multiplier}
-                  onChange={(e) => updateRushHour("speed_multiplier", Number(e.target.value))}
-                />
-              </Field>
-            </>
-          ) : null}
-        </ConfigSection>
+          <ConfigSection title="Demand">
+            <Field label="Order arrival rate (/min)">
+              <input
+                type="number"
+                step="0.1"
+                className="input"
+                value={config.base_order_rate_per_minute}
+                onChange={(e) =>
+                  updateField("base_order_rate_per_minute", Number(e.target.value))
+                }
+              />
+            </Field>
+            <label className="flex items-center gap-2 text-[11px] text-[var(--text-dim)] self-end pb-1.5">
+              <input
+                type="checkbox"
+                checked={rushHourEnabled}
+                onChange={(e) => setRushHourEnabled(e.target.checked)}
+              />
+              Enable rush-hour window
+            </label>
+            {rushHourEnabled ? (
+              <>
+                <Field label="Rush start (min)">
+                  <input
+                    type="number"
+                    className="input"
+                    value={rushHour.start_minute}
+                    onChange={(e) => updateRushHour("start_minute", Number(e.target.value))}
+                  />
+                </Field>
+                <Field label="Rush end (min)">
+                  <input
+                    type="number"
+                    className="input"
+                    value={rushHour.end_minute}
+                    onChange={(e) => updateRushHour("end_minute", Number(e.target.value))}
+                  />
+                </Field>
+                <Field label="Demand multiplier">
+                  <input
+                    type="number"
+                    step="0.1"
+                    className="input"
+                    value={rushHour.demand_multiplier}
+                    onChange={(e) => updateRushHour("demand_multiplier", Number(e.target.value))}
+                  />
+                </Field>
+                <Field label="Travel speed multiplier">
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0.05"
+                    max="1"
+                    className="input"
+                    value={rushHour.speed_multiplier}
+                    onChange={(e) => updateRushHour("speed_multiplier", Number(e.target.value))}
+                  />
+                </Field>
+              </>
+            ) : null}
+          </ConfigSection>
 
-        <ConfigSection title="Merchant behavior">
-          <Field label="Avg prep time (min)">
-            <input
-              type="number"
-              className="input"
-              value={config.avg_merchant_prep_minutes}
-              onChange={(e) => updateField("avg_merchant_prep_minutes", Number(e.target.value))}
-            />
-          </Field>
-          <Field label="Prep time variance (stddev)">
-            <input
-              type="number"
-              className="input"
-              value={config.merchant_prep_stddev_minutes}
-              onChange={(e) =>
-                updateField("merchant_prep_stddev_minutes", Number(e.target.value))
-              }
-            />
-          </Field>
-        </ConfigSection>
+          <ConfigSection title="Merchant behavior">
+            <Field label="Avg prep time (min)">
+              <input
+                type="number"
+                className="input"
+                value={config.avg_merchant_prep_minutes}
+                onChange={(e) => updateField("avg_merchant_prep_minutes", Number(e.target.value))}
+              />
+            </Field>
+            <Field label="Prep time variance (stddev)">
+              <input
+                type="number"
+                className="input"
+                value={config.merchant_prep_stddev_minutes}
+                onChange={(e) =>
+                  updateField("merchant_prep_stddev_minutes", Number(e.target.value))
+                }
+              />
+            </Field>
+          </ConfigSection>
+        </div>
 
-        <ConfigSection
-          title="Failure hazard rates (ground truth)"
-          hint="Per-tick probabilities that drive the simulation's real outcomes — turn these up to generate more failure risk for the demo. The risk engine never sees these numbers directly; it only sees observable state."
-        >
-          <Field label="Driver goes offline">
-            <input
-              type="number"
-              step="0.0001"
-              className="input"
-              value={config.driver_offline_probability_per_tick}
-              onChange={(e) =>
-                updateField("driver_offline_probability_per_tick", Number(e.target.value))
-              }
-            />
-          </Field>
-          <Field label="Merchant stockout">
-            <input
-              type="number"
-              step="0.01"
-              className="input"
-              value={config.merchant_stockout_probability}
-              onChange={(e) =>
-                updateField("merchant_stockout_probability", Number(e.target.value))
-              }
-            />
-          </Field>
-          <Field label="Customer unreachable">
-            <input
-              type="number"
-              step="0.01"
-              className="input"
-              value={config.customer_unreachable_probability}
-              onChange={(e) =>
-                updateField("customer_unreachable_probability", Number(e.target.value))
-              }
-            />
-          </Field>
-          <Field label="Perishable spoilage (when late)">
-            <input
-              type="number"
-              step="0.01"
-              className="input"
-              value={config.perishable_spoilage_probability_per_tick}
-              onChange={(e) =>
-                updateField("perishable_spoilage_probability_per_tick", Number(e.target.value))
-              }
-            />
-          </Field>
-        </ConfigSection>
+        <div data-tour="hazard-rates">
+          <ConfigSection
+            title="Failure hazard rates (ground truth)"
+            hint={
+              <>
+                These control how often problems occur inside the simulator — the hidden ground
+                truth used to generate outcomes.{" "}
+                <strong className="text-[var(--warning)]">
+                  The risk engine never receives these values directly
+                </strong>{" "}
+                — it must infer risk from observable marketplace state, the same way a real
+                system would. Not all four are checked the same way: two are re-rolled every
+                simulated minute, two are rolled once at a specific moment.
+              </>
+            }
+          >
+            <Field label="Driver goes offline (per tick, while delivering)">
+              <input
+                type="number"
+                step="0.0001"
+                className="input"
+                value={config.driver_offline_probability_per_tick}
+                onChange={(e) =>
+                  updateField("driver_offline_probability_per_tick", Number(e.target.value))
+                }
+              />
+            </Field>
+            <Field label="Merchant stockout (once, at order confirmation)">
+              <input
+                type="number"
+                step="0.01"
+                className="input"
+                value={config.merchant_stockout_probability}
+                onChange={(e) =>
+                  updateField("merchant_stockout_probability", Number(e.target.value))
+                }
+              />
+            </Field>
+            <Field label="Customer unreachable (once, at arrival)">
+              <input
+                type="number"
+                step="0.01"
+                className="input"
+                value={config.customer_unreachable_probability}
+                onChange={(e) =>
+                  updateField("customer_unreachable_probability", Number(e.target.value))
+                }
+              />
+            </Field>
+            <Field label="Perishable spoilage (per tick, once already late)">
+              <input
+                type="number"
+                step="0.01"
+                className="input"
+                value={config.perishable_spoilage_probability_per_tick}
+                onChange={(e) =>
+                  updateField("perishable_spoilage_probability_per_tick", Number(e.target.value))
+                }
+              />
+            </Field>
+          </ConfigSection>
+        </div>
 
-        <ConfigSection
-          title="Baseline policy"
-          hint="Risk-score threshold used only by the naive 'threshold-based' baseline — OrderGuard's own expected-value engine doesn't use a fixed threshold at all."
-        >
-          <Field label="Threshold-based trigger score">
-            <input
-              type="number"
-              className="input"
-              value={threshold}
-              onChange={(e) => setThreshold(Number(e.target.value))}
-            />
-          </Field>
-        </ConfigSection>
+        <div data-tour="baseline-threshold">
+          <ConfigSection
+            title="Baseline policy"
+            hint="Risk-score threshold used only by the naive 'threshold-based' baseline — OrderGuard's own expected-value strategy doesn't use a fixed threshold to decide anything."
+          >
+            <Field label="Threshold-based trigger score">
+              <input
+                type="number"
+                className="input"
+                value={threshold}
+                onChange={(e) => setThreshold(Number(e.target.value))}
+              />
+            </Field>
+          </ConfigSection>
+        </div>
 
         <button
+          data-tour="run-button"
           className="mt-2 px-4 py-2 rounded-md bg-[var(--accent)] text-black text-[12px] font-medium disabled:opacity-50"
           onClick={runExperiment}
           disabled={status === "running"}
@@ -325,9 +351,16 @@ export default function SimulationLabPage() {
       </div>
 
       {result ? (
-        <div className="panel p-4 overflow-x-auto">
+        <div data-tour="results-section" className="panel p-4 overflow-x-auto">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-[13px] font-semibold">Comparative results</h2>
+            <div className="flex items-center gap-1.5">
+              <h2 className="text-[13px] font-semibold">Comparative results</h2>
+              <InfoTooltip title="How are strategies compared?">
+                All three strategies re-seed from the same config, so they start identical and
+                diverge only once an intervention actually changes an outcome — that divergence
+                is the point of the comparison.
+              </InfoTooltip>
+            </div>
             <button
               className="text-[12px] text-[var(--accent)]"
               onClick={() => router.push(`/?run=${result.simulation_run_id}`)}
@@ -384,8 +417,20 @@ export default function SimulationLabPage() {
                 <th>Cancelled</th>
                 <th>Late rate</th>
                 <th>Failure rate</th>
-                <th>Avg delay (min)</th>
-                <th>P95 delay (min)</th>
+                <th>
+                  Avg schedule deviation (min)
+                  <InfoTooltip title="Avg schedule deviation">
+                    Mean (delivered time − promised time) over delivered orders, in minutes.
+                    Negative means early, positive means late.
+                  </InfoTooltip>
+                </th>
+                <th>
+                  P95 deviation (min)
+                  <InfoTooltip title="P95 deviation">
+                    The deviation value that 95% of delivered orders did better than — a way to
+                    see the bad tail without one outlier skewing the average.
+                  </InfoTooltip>
+                </th>
                 <th>Interventions</th>
                 <th>Cost</th>
               </tr>
@@ -400,8 +445,18 @@ export default function SimulationLabPage() {
                   <td className="mono">{m.cancelled_count}</td>
                   <td className="mono">{(m.late_rate * 100).toFixed(1)}%</td>
                   <td className="mono">{(m.failure_rate * 100).toFixed(1)}%</td>
-                  <td className="mono">{m.avg_delay_minutes.toFixed(1)}</td>
-                  <td className="mono">{m.p95_delay_minutes.toFixed(1)}</td>
+                  <td className="mono">
+                    {m.avg_delay_minutes >= 0 ? "+" : ""}
+                    {m.avg_delay_minutes.toFixed(1)}
+                    <span className="text-[var(--text-faint)]">
+                      {" "}
+                      ({m.avg_delay_minutes < 0 ? "early" : "late"})
+                    </span>
+                  </td>
+                  <td className="mono">
+                    {m.p95_delay_minutes >= 0 ? "+" : ""}
+                    {m.p95_delay_minutes.toFixed(1)}
+                  </td>
                   <td className="mono">{m.intervention_count}</td>
                   <td className="mono">${m.total_intervention_cost.toFixed(2)}</td>
                 </tr>
@@ -452,7 +507,7 @@ function ConfigSection({
   children,
 }: {
   title: string;
-  hint?: string;
+  hint?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
