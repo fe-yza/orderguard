@@ -44,11 +44,13 @@ function OverviewInner() {
   const [error, setError] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [bootstrapping, setBootstrapping] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
     api
       .listSimulations()
       .then((list) => {
+        setError(null);
         setRuns(list);
         if (requestedRunId && list.some((r) => r.id === requestedRunId)) {
           setSelectedRunId(requestedRunId);
@@ -57,7 +59,7 @@ function OverviewInner() {
         }
       })
       .catch((e) => setError(describeError(e)));
-  }, [requestedRunId]);
+  }, [requestedRunId, loadAttempt]);
 
   const refresh = useCallback((runId: string) => {
     // Fetch every scored order once (min_score=0), not just ones above the
@@ -171,7 +173,23 @@ function OverviewInner() {
     return (
       <div className="flex flex-col gap-5">
         <AboutBanner />
-        <p className="text-[var(--text-dim)]">Loading…</p>
+        {error ? (
+          <div role="alert" className="panel p-6 max-w-lg">
+            <p>Unable to load the dashboard.</p>
+            <p className="mt-2 text-[var(--text-dim)]">{error}</p>
+            <button
+              className="mt-4 text-[var(--accent)] underline"
+              onClick={() => {
+                setError(null);
+                setLoadAttempt((attempt) => attempt + 1);
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        ) : (
+          <p className="text-[var(--text-dim)]">Loading…</p>
+        )}
       </div>
     );
   }
@@ -180,6 +198,7 @@ function OverviewInner() {
     return (
       <div className="flex flex-col gap-5">
         <AboutBanner />
+        {error && <p role="alert">{error}</p>}
         {bootstrapping ? (
           <div className="panel p-6 max-w-lg text-[12px] text-[var(--text-dim)]">
             Setting up a demo scenario for the guided tour — running a real simulation now,

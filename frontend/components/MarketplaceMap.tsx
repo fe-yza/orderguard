@@ -62,7 +62,7 @@ export function MarketplaceMap({
   }, [merchants, drivers, customers]);
 
   const routedDeliveries = useMemo(() => {
-    const withDriver = deliveries.filter((d) => d.driver_id !== null);
+    const withDriver = (deliveries ?? []).filter((d) => d.driver_id !== null);
     if (withDriver.length <= MAX_ROUTES_RENDERED) return withDriver;
     // Deterministic downsample (every Nth), not random — a demo should show
     // the same subset on every render, not flicker between reloads.

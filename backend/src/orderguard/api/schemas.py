@@ -19,7 +19,11 @@ TERMINAL_STATUS_VALUES = frozenset(s.value for s in TERMINAL_ORDER_STATUSES)
 class RushHourWindowIn(BaseModel):
     start_minute: int = Field(ge=0)
     end_minute: int
-    demand_multiplier: float = Field(gt=0)
+    # demand_multiplier scales order spawn rate directly (see
+    # simulation/engine.py's _spawn_orders), so it's bounded for the same
+    # reason base_order_rate_per_minute is below -- an unbounded multiplier
+    # would let a small base rate still produce an unbounded order count.
+    demand_multiplier: float = Field(gt=0, le=5)
     speed_multiplier: float = Field(gt=0, le=1)
 
     def to_domain(self) -> RushHourWindow:
@@ -32,26 +36,36 @@ class RushHourWindowIn(BaseModel):
 
 
 class SimulationConfigIn(BaseModel):
+    """Request-side simulation config. Every size/rate field carries an
+    upper bound in addition to Pydantic's usual `gt`/`ge` lower bound: this
+    is public, unauthenticated input (see `api/rate_limit.py`), and the
+    engine's cost scales with duration_minutes x order-spawn-rate x
+    entity-count, so an unbounded field here would let one request run
+    arbitrarily long. Bounds are set well above every real value used by
+    the demo/tour/UI (documented per-field) so nothing legitimate is
+    affected -- see `docs/deployment.md`-equivalent note in the README.
+    """
+
     seed: int
     start_time: datetime
-    duration_minutes: int = Field(gt=0)
-    num_merchants: int = Field(gt=0)
-    num_drivers: int = Field(gt=0)
-    num_customers: int = Field(gt=0)
-    base_order_rate_per_minute: float = Field(gt=0)
-    map_size_km: float = Field(gt=0)
-    avg_driver_speed_kmh: float = 30.0
-    driver_speed_stddev_kmh: float = 5.0
-    avg_merchant_prep_minutes: float = 12.0
-    merchant_prep_stddev_minutes: float = 3.0
-    promised_delivery_buffer_minutes: float = 25.0
-    tick_minutes: int = 1
-    max_wait_for_driver_minutes: float = 15.0
+    duration_minutes: int = Field(gt=0, le=1440)  # UI/tour max used: 480
+    num_merchants: int = Field(gt=0, le=100)  # UI/tour max used: 20
+    num_drivers: int = Field(gt=0, le=300)  # UI/tour max used: 35
+    num_customers: int = Field(gt=0, le=2000)  # UI/tour max used: 300
+    base_order_rate_per_minute: float = Field(gt=0, le=5)  # UI/tour max used: 1.4
+    map_size_km: float = Field(gt=0, le=500)  # UI/tour max used: 14.0
+    avg_driver_speed_kmh: float = Field(default=30.0, gt=0, le=200)
+    driver_speed_stddev_kmh: float = Field(default=5.0, ge=0, le=100)
+    avg_merchant_prep_minutes: float = Field(default=12.0, gt=0, le=180)
+    merchant_prep_stddev_minutes: float = Field(default=3.0, ge=0, le=90)
+    promised_delivery_buffer_minutes: float = Field(default=25.0, gt=0, le=360)
+    tick_minutes: int = Field(default=1, ge=1, le=60)
+    max_wait_for_driver_minutes: float = Field(default=15.0, gt=0, le=360)
     driver_offline_probability_per_tick: float = Field(default=0.0008, ge=0, le=1)
     merchant_stockout_probability: float = Field(default=0.03, ge=0, le=1)
     customer_unreachable_probability: float = Field(default=0.02, ge=0, le=1)
     perishable_spoilage_probability_per_tick: float = Field(default=0.05, ge=0, le=1)
-    rush_hour_windows: list[RushHourWindowIn] = Field(default_factory=list)
+    rush_hour_windows: list[RushHourWindowIn] = Field(default_factory=list, max_length=20)
 
     def to_domain(self) -> SimulationConfig:
         return SimulationConfig(

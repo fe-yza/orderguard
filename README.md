@@ -21,6 +21,7 @@ intervention?
 - [Benchmarks](#benchmarks)
 - [Engineering decisions](#engineering-decisions)
 - [Running it](#running-it)
+- [Deployment](#deployment)
 - [Testing](#testing)
 - [Honest limitations](#honest-limitations)
 - [Repo structure](#repo-structure)
@@ -230,22 +231,75 @@ python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 createdb orderguard_dev
 .venv/bin/alembic upgrade head
 ORDERGUARD_DATABASE_URL=postgresql+psycopg://localhost:5432/orderguard_dev \
-  .venv/bin/uvicorn orderguard.api.app:app --reload
+  .venv/bin/python -m uvicorn orderguard.api.app:app --app-dir src --reload
 
 cd frontend
 npm install && npm run dev
 ```
 
+## Deployment
+
+OrderGuard has no authentication layer by design (it's a public portfolio
+demo, not a real product), so the hardening below is scoped to that: bound
+the one genuinely expensive endpoint, rate-limit it, and lock CORS down to
+known origins instead of `*`.
+
+**Backend — environment variables** (`backend/.env.example`):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ORDERGUARD_DATABASE_URL` | `postgresql+psycopg://localhost:5432/orderguard_dev` | SQLAlchemy connection string. Set to your real Postgres instance in production. |
+| `ORDERGUARD_ALLOWED_ORIGINS` | `http://localhost:3000` | Comma-separated CORS allow-list. Add the deployed frontend's real origin (e.g. `https://orderguard.vercel.app`); never `*`. |
+| `ORDERGUARD_DEBUG` | `false` | Must stay `false` on anything internet-reachable — `true` returns exception tracebacks in API responses. |
+| `ORDERGUARD_RATE_LIMIT_MAX_REQUESTS` | `20` | Per-client-IP request budget for `POST /simulations` (the only endpoint that runs real simulation work — three full passes per request). |
+| `ORDERGUARD_RATE_LIMIT_WINDOW_SECONDS` | `60` | Sliding window the budget above applies to. |
+
+`SimulationConfigIn` also caps every size/rate field server-side
+(`duration_minutes<=1440`, `num_customers<=2000`, `num_drivers<=300`,
+`num_merchants<=100`, `base_order_rate_per_minute<=5`, rush-hour
+`demand_multiplier<=5`, etc. — see `api/schemas.py`), so a request can't
+force an arbitrarily long-running simulation regardless of rate limiting.
+All limits sit well above every value the demo, guided tour, and Simulation
+Lab UI actually use.
+
+**Frontend — environment variables** (`frontend/.env.example`):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | Base URL the browser calls. Inlined into the client bundle at build time, so it must be set correctly *before* building/deploying, not just at runtime. Set to your deployed backend's public URL. |
+
+**Production start commands** (what each Dockerfile actually runs):
+
+```bash
+# Backend (from backend/, with the env vars above set)
+alembic upgrade head && uvicorn orderguard.api.app:app --host 0.0.0.0 --port 8000
+
+# Frontend (standalone Next.js build)
+npm run build
+node .next/standalone/server.js
+```
+
+Deploying the frontend to Vercel instead of Docker: Vercel runs its own
+build/start, so only `NEXT_PUBLIC_API_URL` needs to be set as a project
+environment variable (build-time, not preview-only, since it's inlined).
+Whatever origin Vercel assigns that deployment must then be added to the
+backend's `ORDERGUARD_ALLOWED_ORIGINS`.
+
+Rate limiting is an in-memory, single-process sliding window (see
+`api/rate_limit.py`) — correct and sufficient for one backend instance, but
+each replica would track its own counters if this ever ran horizontally
+scaled; that would need a shared store (e.g. Redis) instead.
+
 ## Testing
 
-111 backend tests (`cd backend && pytest`) covering domain lifecycle
+119 backend tests (`cd backend && pytest`) covering domain lifecycle
 transitions, the event bus, risk scoring, intervention selection, the
 experiment framework (including a scenario-specific test that proves
 interventions have a *measured* causal effect on outcomes, not just
 recorded ones), persistence (against a real Postgres test database, not
-mocks), the API (via `TestClient` against real Postgres), and concurrent
-request handling. Frontend: `tsc --noEmit`, `eslint`, `next build` all pass
-clean.
+mocks), the API (via `TestClient` against real Postgres) including its
+config-size limits and per-IP rate limit, and concurrent request handling.
+Frontend: `tsc --noEmit`, `eslint`, `next build` all pass clean.
 
 CI (`.github/workflows/ci.yml`) runs the same lint/test/build steps on every
 push and PR — every individual command in it has been run and verified

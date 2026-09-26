@@ -25,6 +25,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
     cache: "no-store",
+  }).catch(() => {
+    throw new Error(
+      `Cannot reach the API at ${API_URL}. Check that the backend is running and allows this website's origin, then retry.`,
+    );
   });
   if (!response.ok) {
     const body = await response.text();

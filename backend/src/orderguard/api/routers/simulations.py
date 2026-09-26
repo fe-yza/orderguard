@@ -8,6 +8,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from orderguard.api.rate_limit import enforce_simulation_rate_limit
 from orderguard.api.schemas import (
     TERMINAL_STATUS_VALUES,
     CustomerOut,
@@ -31,7 +32,11 @@ from orderguard.persistence.database import get_session
 router = APIRouter(prefix="/simulations", tags=["simulations"])
 
 
-@router.post("", response_model=ExperimentResponseOut)
+@router.post(
+    "",
+    response_model=ExperimentResponseOut,
+    dependencies=[Depends(enforce_simulation_rate_limit)],
+)
 def create_experiment(
     request: ExperimentRequest, session: Session = Depends(get_session)
 ) -> ExperimentResponseOut:

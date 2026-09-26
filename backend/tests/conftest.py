@@ -3,6 +3,11 @@ import os
 os.environ.setdefault(
     "ORDERGUARD_DATABASE_URL", "postgresql+psycopg://localhost:5432/orderguard_test"
 )
+# The test suite legitimately fires far more POST /simulations requests in
+# a short window than any real client should (e.g. 21 across test_api.py,
+# several of them concurrent) -- raise the budget so the production rate
+# limit (api/rate_limit.py) never causes test flakiness.
+os.environ.setdefault("ORDERGUARD_RATE_LIMIT_MAX_REQUESTS", "1000")
 
 import pytest  # noqa: E402
 

@@ -55,6 +55,16 @@ class TestCreateExperiment:
         response = client.post("/simulations", json={"config": bad_config, "threshold": 40.0})
         assert response.status_code == 422
 
+    def test_rejects_oversized_config(self, db_session):
+        # Public deployment guard (see SimulationConfigIn) -- a request
+        # trying to force an excessively large/expensive simulation is
+        # rejected at validation, before any engine work starts.
+        oversized_config = {**BASE_CONFIG, "num_customers": 1_000_000}
+        response = client.post(
+            "/simulations", json={"config": oversized_config, "threshold": 40.0}
+        )
+        assert response.status_code == 422
+
 
 class TestSimulationEndpoints:
     def test_list_and_get_simulation(self, db_session):
